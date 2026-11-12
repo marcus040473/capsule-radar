@@ -490,7 +490,16 @@ void ui_set_feed_source(const char *host) {
 }
 
 // GPS indicator. state: 0 = off / no module (hidden), 1 = acquiring (amber), 2 = fix (green).
+static bool s_gpsPresent = false;
+static int  s_gpsState = 0, s_gpsSats = 0;
+static lv_obj_t *s_setGpsLbl = nullptr;   // settings page "GPS-Signal" value (only while it is open)
+static void set_gps_label(void);
+void ui_set_gps_present(bool present) { s_gpsPresent = present; }
+
 void ui_set_gps(int state, int sats, float altM) {
+    s_gpsState = state;
+    s_gpsSats = sats;
+    set_gps_label();
     if (state <= 0) {                                 // hidden when GPS auto-location is off
         if (s_hudGps)   lv_label_set_text(s_hudGps, "");
         if (s_statsGps) lv_label_set_text(s_statsGps, "");
@@ -1136,6 +1145,19 @@ static void set_cycle_cb(lv_event_t *e) {
     set_cycle_label(id, set_get(id));   // show what main actually applied
 }
 
+// "GPS-Signal": the same states as the HUD icon (amber while searching, green with a fix)
+static void set_gps_label(void) {
+    if (!s_setGpsLbl) return;
+    char b[40];
+    lv_color_t c = UI_DIM;
+    if (!s_gpsPresent)        snprintf(b, sizeof(b), "Kein GPS-Modul");
+    else if (s_gpsState <= 0) snprintf(b, sizeof(b), "Aus");
+    else if (s_gpsState == 1) { snprintf(b, sizeof(b), LV_SYMBOL_GPS " Sucht (%d Sat.)", s_gpsSats); c = lv_color_hex(0xFFB23C); }
+    else                      { snprintf(b, sizeof(b), LV_SYMBOL_GPS " Empfang %d Sat.", s_gpsSats); c = UI_GREEN; }
+    lv_label_set_text(s_setGpsLbl, b);
+    lv_obj_set_style_text_color(s_setGpsLbl, c, 0);
+}
+
 static void set_theme_cb(lv_event_t *) {
     radar::setTheme((radar::theme() + 1) % 4);   // saved by main's theme-changed callback
     set_theme_label();
@@ -1358,6 +1380,13 @@ static void settings_open(void) {
     set_add_switch(UI_SET_AIRPORTS, "Flughäfen");
     set_add_switch(UI_SET_HIDEGROUND, "Am Boden ausblenden");
     set_add_switch(UI_SET_CLOCK, "Uhr im Ruhezustand");
+    if (s_gpsPresent) set_add_switch(UI_SET_GPS, "GPS-Standort");
+    {
+        lv_obj_t *r = set_row("GPS-Signal", false);
+        s_setGpsLbl = lv_label_create(r);
+        lv_obj_add_style(s_setGpsLbl, &s_stLbl, 0);
+        set_gps_label();
+    }
     set_add_switch(UI_SET_WIFI, "WLAN");
     if (s_netCount) set_add_cycle(UI_SET_WIFINET, "WLAN-Netz");
     if (s_netAdd)   set_add_confirm("WLAN hinzufügen", &kActWifiAdd);
@@ -1390,6 +1419,7 @@ static void settings_close(void) {
     s_setThemeLbl = nullptr;
     s_setQr = nullptr;
     s_setUrlLbl = nullptr;
+    s_setGpsLbl = nullptr;
     for (lv_obj_t *&w : s_setWidget) w = nullptr;
 }
 

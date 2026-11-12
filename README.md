@@ -25,7 +25,8 @@
 > **Am Gerät:** auf dem Radar nach rechts wischen = **Einstellungen** (Helligkeit, Ton
 > Aus/Leise/Laut, Hinweiston, Design, Einheiten, Flugspuren, Bild drehen, Radar-Sweep,
 > Flughäfen, Flugzeuge am Boden, Uhr im Ruhezustand, WLAN an/aus, WLAN-Netz wählen,
-> WLAN hinzufügen, QR-Code zur Webseite, Gerät ausschalten). Noch einmal wischen = **Foto-Seite**:
+> WLAN hinzufügen, GPS-Standort und GPS-Signal (beim -G-Board), QR-Code zur Webseite,
+> Gerät ausschalten). Noch einmal wischen = **Foto-Seite**:
 > das Foto wird auf der Webseite hochgeladen und nur auf dem Gerät gespeichert (LittleFS),
 > nie in der Firmware. Das Gerät merkt sich bis zu 5 WLANs und probiert beim Start reihum,
 > welches gerade da ist. Die Überschrift steht in `src/config.h` (`UI_SETTINGS_TITLE`).

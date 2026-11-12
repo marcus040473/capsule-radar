@@ -1245,6 +1245,7 @@ static int deviceSettingGet(int id) {
         case UI_SET_CLOCK:      return g_clockOn ? 1 : 0;
         case UI_SET_WIFI:       return g_wifiOff ? 0 : 1;
         case UI_SET_WIFINET:    return netsCurrent();
+        case UI_SET_GPS:        return g_useGps ? 1 : 0;
         default:                return 0;
     }
 }
@@ -1320,6 +1321,10 @@ static void deviceSettingSet(int id, int v, bool save) {
                 Serial.println("[wifi] switched on again -> restarting");
                 g_rebootAtMs = millis() + 300;
             }
+            break;
+        case UI_SET_GPS:                          // like the web page's "GPS für den Standort"
+            g_useGps = v != 0;
+            nvsPutBool("usegps", g_useGps);
             break;
         case UI_SET_WIFINET:
             if (g_wifiOff || v < 0 || v >= g_netCount) break;
@@ -1500,6 +1505,7 @@ void setup() {
         ui_set_poweroff_cb([]() { g_powerOffAtMs = millis() + 600; });   // let 'Powering off' render first
 #endif
     gps_begin();       // LC76G GNSS (no-op if not the -G variant)
+    ui_set_gps_present(gps_present());   // settings page: GPS switch + signal line
     gps_set_idle_hook(display::sweepTick);   // keep the sweep moving during GPS reads (it never touches I2C)
     battery_enable_codec_rail();   // power the ES8311 analog rail before audio init
 
