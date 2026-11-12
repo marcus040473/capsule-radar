@@ -7,7 +7,7 @@ name: Build firmware & deploy web flasher
 
 on:
   push:
-    branches: [main, deutsch]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

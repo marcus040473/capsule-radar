@@ -28,7 +28,13 @@
 /* Object/style pool (internal RAM). Big bitmap draw buffers are allocated
    separately in PSRAM in display.cpp. Bump this if the radar UI grows. */
 #define LV_MEM_CUSTOM 0
+#ifdef ARDUINO
 #define LV_MEM_SIZE (64U * 1024U)
+#else
+/* Desktop simulator only: 64-bit pointers make every LVGL object ~1.6x larger than on the
+   ESP32, so the same UI needs a bigger pool there (the settings page ran it out of memory). */
+#define LV_MEM_SIZE (96U * 1024U)
+#endif
 #define LV_MEM_ADR 0
 #define LV_MEM_BUF_MAX_NUM 16
 #define LV_MEMCPY_MEMSET_STD 0

@@ -25,6 +25,7 @@
 
 static lv_obj_t *s_tv = nullptr;
 static lv_obj_t *s_tileRadar = nullptr, *s_tileList = nullptr, *s_tileStats = nullptr, *s_tileWeather = nullptr;
+static lv_obj_t *s_tileSettings = nullptr;   // links vom Radar (Spalte 0); das Radar sitzt in Spalte 1
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
 static lv_obj_t *s_photo = nullptr, *s_photoCredit = nullptr;   // aircraft photo above the card
@@ -565,7 +566,7 @@ static void list_tap_cb(lv_event_t *e) {
     (void)e;
     if (!s_listPressHex[0] || !radar::selectHex(s_listPressHex)) return;   // left the feed mid-press
     refresh_card();
-    lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_ON);   // jump back to the radar
+    lv_obj_set_tile_id(s_tv, 1, 0, LV_ANIM_ON);   // jump back to the radar (column 1)
 }
 
 static void build_list(void) {
@@ -856,6 +857,7 @@ static int active_view_index(void) {
     if (act == s_tileList)    return 1;
     if (act == s_tileStats)   return 2;
     if (act == s_tileWeather) return 3;
+    if (act == s_tileSettings) return 4;
     return 0;
 }
 
@@ -865,6 +867,7 @@ static void refresh_active_tile(void) {
     if (act == s_tileList)  build_list();
     else if (act == s_tileStats) build_stats();
     else if (act == s_tileWeather) build_weather();
+    else if (act == s_tileSettings) ui_settings_refresh();
 }
 
 void ui_on_data_updated(void) {
@@ -993,8 +996,305 @@ static void build_card(void) {
     lv_obj_add_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
 }
 
+// ------------------------------------------------------------------ settings
+// Einstellungen-Seite links vom Radar: eine senkrecht scrollbare Liste aus Schiebereglern,
+// Schaltern und Tipp-Knöpfen (jeder Tipp schaltet zur nächsten Option weiter). Werte kommen
+// aus main.cpp (Getter) und gehen dorthin zurück (Setter), damit Gerät und Webseite dieselbe
+// Logik und denselben NVS-Speicher benutzen.
+static int  (*s_setGet)(int) = nullptr;
+static void (*s_setSet)(int, int, bool) = nullptr;
+static bool s_setShowVolume = true;
+static lv_obj_t *s_setList = nullptr;
+static lv_obj_t *s_setWidget[UI_SET_COUNT] = {};      // slider / switch / cycle-button label
+static lv_obj_t *s_setVolRow = nullptr;
+static lv_obj_t *s_setThemeLbl = nullptr;
+
+static const char *const kSetUnits[]  = { "Luftfahrt", "Metrisch", "Imperial" };
+static const char *const kSetTrail[]  = { "Aus", "Kurz", "Mittel", "Lang" };
+static const char *const kSetAlerts[] = { "Aus", "Nur Notfälle", "Neue + Notfälle" };
+static const char *const kSetThemes[] = { "Phosphor", "Orb", "Amber CRT", "Militär" };
+
+static const char *const *set_options(int id, int *n) {
+    switch (id) {
+        case UI_SET_UNITS:  *n = 3; return kSetUnits;
+        case UI_SET_TRAIL:  *n = 4; return kSetTrail;
+        case UI_SET_ALERTS: *n = 3; return kSetAlerts;
+        default:            *n = 0; return nullptr;
+    }
+}
+
+static int set_get(int id) { return s_setGet ? s_setGet(id) : 0; }
+
+static void set_cycle_label(int id, int v) {
+    int n = 0;
+    const char *const *opt = set_options(id, &n);
+    if (opt && s_setWidget[id]) lv_label_set_text(s_setWidget[id], opt[(v % n + n) % n]);
+}
+
+static void set_theme_label(void) {
+    const int th = radar::theme();
+    if (s_setThemeLbl) lv_label_set_text(s_setThemeLbl, kSetThemes[(th >= 0 && th < 4) ? th : 0]);
+}
+
+void ui_set_settings_cb(int (*get)(int), void (*set)(int, int, bool)) {
+    s_setGet = get;
+    s_setSet = set;
+    ui_settings_refresh();
+}
+
+void ui_set_settings_volume(bool show) {
+    s_setShowVolume = show;
+    if (!s_setVolRow) return;
+    if (show) lv_obj_clear_flag(s_setVolRow, LV_OBJ_FLAG_HIDDEN);
+    else      lv_obj_add_flag(s_setVolRow, LV_OBJ_FLAG_HIDDEN);
+}
+
+void ui_settings_refresh(void) {
+    if (!s_setList) return;
+    for (int id = 0; id < UI_SET_COUNT; ++id) {
+        lv_obj_t *w = s_setWidget[id];
+        if (!w) continue;
+        const int v = set_get(id);
+        if (lv_obj_check_type(w, &lv_slider_class)) {
+            if (!lv_obj_has_state(w, LV_STATE_PRESSED)) lv_slider_set_value(w, v, LV_ANIM_OFF);   // don't fight a drag
+        } else if (lv_obj_check_type(w, &lv_switch_class)) {
+            if (v) lv_obj_add_state(w, LV_STATE_CHECKED); else lv_obj_clear_state(w, LV_STATE_CHECKED);
+        } else {
+            set_cycle_label(id, v);
+        }
+    }
+    set_theme_label();
+}
+
+static void set_slider_cb(lv_event_t *e) {
+    const int id = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_obj_t *s = lv_event_get_target(e);
+    const bool final = lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED;   // RELEASED / PRESS_LOST
+    if (s_setSet) s_setSet(id, (int)lv_slider_get_value(s), final);
+}
+
+static void set_switch_cb(lv_event_t *e) {
+    const int id = (int)(intptr_t)lv_event_get_user_data(e);
+    lv_obj_t *sw = lv_event_get_target(e);
+    if (s_setSet) s_setSet(id, lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0, true);
+}
+
+static void set_cycle_cb(lv_event_t *e) {
+    const int id = (int)(intptr_t)lv_event_get_user_data(e);
+    int n = 0;
+    set_options(id, &n);
+    if (n <= 0) return;
+    const int v = (set_get(id) + 1) % n;
+    if (s_setSet) s_setSet(id, v, true);
+    set_cycle_label(id, set_get(id));   // show what main actually applied
+}
+
+static void set_theme_cb(lv_event_t *) {
+    radar::setTheme((radar::theme() + 1) % 4);   // saved by main's theme-changed callback
+    set_theme_label();
+}
+
+// Speicher: LVGLs Heap ist knapp (64 KB, davon braucht der Rest der Oberfläche ~45 KB). Darum
+// teilen sich alle Zeilen und Bedienelemente eine Handvoll statischer Styles, und Lage/Größe
+// macht das Flex-Layout -- lokale Styles pro Objekt würden je Objekt Heap kosten.
+static lv_style_t s_stRow, s_stRowTall, s_stLbl, s_stBtn, s_stBtnPr, s_stBtnLbl;
+static lv_style_t s_stTrack, s_stInd, s_stKnob, s_stSwKnob, s_stHint;
+
+static void set_styles_init(void) {
+    const lv_coord_t h = s_bigText ? 52 : 46;
+    lv_style_init(&s_stRow);
+    lv_style_set_width(&s_stRow, lv_pct(100));
+    lv_style_set_height(&s_stRow, h);
+    lv_style_set_pad_hor(&s_stRow, 4);
+    lv_style_set_border_side(&s_stRow, LV_BORDER_SIDE_BOTTOM);
+    lv_style_set_border_color(&s_stRow, UI_GREEN);
+    lv_style_set_border_opa(&s_stRow, 40);
+    lv_style_set_border_width(&s_stRow, 1);
+    lv_style_set_layout(&s_stRow, LV_LAYOUT_FLEX);
+    lv_style_set_flex_flow(&s_stRow, LV_FLEX_FLOW_ROW);
+    lv_style_set_flex_main_place(&s_stRow, LV_FLEX_ALIGN_SPACE_BETWEEN);
+    lv_style_set_flex_cross_place(&s_stRow, LV_FLEX_ALIGN_CENTER);
+    lv_style_set_flex_track_place(&s_stRow, LV_FLEX_ALIGN_CENTER);
+
+    lv_style_init(&s_stRowTall);                       // slider rows: label above the bar
+    lv_style_set_height(&s_stRowTall, s_bigText ? 74 : 64);
+    lv_style_set_pad_hor(&s_stRowTall, 14);
+    lv_style_set_flex_flow(&s_stRowTall, LV_FLEX_FLOW_COLUMN);
+    lv_style_set_flex_main_place(&s_stRowTall, LV_FLEX_ALIGN_SPACE_EVENLY);
+    lv_style_set_flex_cross_place(&s_stRowTall, LV_FLEX_ALIGN_START);
+
+    lv_style_init(&s_stLbl);
+    lv_style_set_text_font(&s_stLbl, F14());
+    lv_style_set_text_color(&s_stLbl, UI_SOFT);
+
+    lv_style_init(&s_stBtn);
+    lv_style_set_width(&s_stBtn, s_bigText ? 172 : 136);
+    lv_style_set_height(&s_stBtn, s_bigText ? 36 : 32);
+    lv_style_set_radius(&s_stBtn, 16);
+    lv_style_set_bg_color(&s_stBtn, UI_PANEL);
+    lv_style_set_bg_opa(&s_stBtn, LV_OPA_COVER);
+    lv_style_set_border_color(&s_stBtn, UI_GREEN);
+    lv_style_set_border_width(&s_stBtn, 1);
+    lv_style_set_shadow_width(&s_stBtn, 0);
+    lv_style_set_layout(&s_stBtn, LV_LAYOUT_FLEX);    // centres its one label
+    lv_style_set_flex_main_place(&s_stBtn, LV_FLEX_ALIGN_CENTER);
+    lv_style_set_flex_cross_place(&s_stBtn, LV_FLEX_ALIGN_CENTER);
+    lv_style_set_flex_track_place(&s_stBtn, LV_FLEX_ALIGN_CENTER);
+    lv_style_init(&s_stBtnPr);
+    lv_style_set_bg_color(&s_stBtnPr, lv_color_hex(0x1F3A2B));
+    lv_style_init(&s_stBtnLbl);
+    lv_style_set_text_font(&s_stBtnLbl, F14());
+    lv_style_set_text_color(&s_stBtnLbl, UI_GREEN);
+
+    lv_style_init(&s_stTrack);                          // slider + switch background
+    lv_style_set_bg_color(&s_stTrack, lv_color_hex(0x1F3A2B));
+    lv_style_set_bg_opa(&s_stTrack, LV_OPA_COVER);
+    lv_style_set_radius(&s_stTrack, LV_RADIUS_CIRCLE);
+    lv_style_init(&s_stInd);
+    lv_style_set_bg_color(&s_stInd, UI_GREEN);
+    lv_style_set_bg_opa(&s_stInd, LV_OPA_COVER);
+    lv_style_set_radius(&s_stInd, LV_RADIUS_CIRCLE);
+    lv_style_init(&s_stKnob);
+    lv_style_set_bg_color(&s_stKnob, UI_GREEN);
+    lv_style_set_bg_opa(&s_stKnob, LV_OPA_COVER);
+    lv_style_set_radius(&s_stKnob, LV_RADIUS_CIRCLE);
+    lv_style_set_pad_all(&s_stKnob, 7);
+    lv_style_init(&s_stSwKnob);
+    lv_style_set_bg_color(&s_stSwKnob, UI_INK);
+    lv_style_set_bg_opa(&s_stSwKnob, LV_OPA_COVER);
+    lv_style_set_radius(&s_stSwKnob, LV_RADIUS_CIRCLE);
+    lv_style_set_pad_all(&s_stSwKnob, -3);              // knob a little inside the track
+
+    lv_style_init(&s_stHint);
+    lv_style_set_width(&s_stHint, lv_pct(100));
+    lv_style_set_text_font(&s_stHint, F12());
+    lv_style_set_text_color(&s_stHint, UI_DIM);
+    lv_style_set_text_align(&s_stHint, LV_TEXT_ALIGN_CENTER);
+    lv_style_set_pad_top(&s_stHint, 10);
+}
+
+// One row: label on the left, control on the right (or underneath, for sliders).
+static lv_obj_t *set_row(const char *label, bool tall) {
+    lv_obj_t *r = lv_obj_create(s_setList);
+    lv_obj_remove_style_all(r);
+    lv_obj_add_style(r, &s_stRow, 0);
+    if (tall) lv_obj_add_style(r, &s_stRowTall, 0);
+    lv_obj_clear_flag(r, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *l = lv_label_create(r);
+    lv_obj_add_style(l, &s_stLbl, 0);
+    lv_label_set_text(l, label);
+    return r;
+}
+
+static void set_add_slider(int id, const char *label, int lo, int hi) {
+    lv_obj_t *r = set_row(label, true);
+    if (id == UI_SET_VOLUME) s_setVolRow = r;
+    lv_obj_t *s = lv_slider_create(r);
+    lv_obj_remove_style_all(s);                         // drop the theme's styles: ours are shared
+    lv_obj_add_style(s, &s_stTrack, LV_PART_MAIN);
+    lv_obj_add_style(s, &s_stInd, LV_PART_INDICATOR);
+    lv_obj_add_style(s, &s_stKnob, LV_PART_KNOB);
+    lv_obj_set_size(s, lv_pct(100), 8);
+    lv_slider_set_range(s, lo, hi);
+    lv_obj_set_ext_click_area(s, 14);                   // a fat target for a finger on an 8 px bar
+    lv_obj_add_event_cb(s, set_slider_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)id);
+    lv_obj_add_event_cb(s, set_slider_cb, LV_EVENT_RELEASED, (void *)(intptr_t)id);
+    lv_obj_add_event_cb(s, set_slider_cb, LV_EVENT_PRESS_LOST, (void *)(intptr_t)id);
+    s_setWidget[id] = s;
+}
+
+static void set_add_switch(int id, const char *label) {
+    lv_obj_t *r = set_row(label, false);
+    lv_obj_t *sw = lv_switch_create(r);
+    lv_obj_remove_style_all(sw);   // no theme styles: their colour fade would replay every time the page opens
+    lv_obj_add_style(sw, &s_stTrack, LV_PART_MAIN);
+    lv_obj_add_style(sw, &s_stInd, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_add_style(sw, &s_stSwKnob, LV_PART_KNOB);
+    lv_obj_set_size(sw, s_bigText ? 56 : 50, s_bigText ? 30 : 26);
+    lv_obj_set_ext_click_area(sw, 10);
+    lv_obj_add_event_cb(sw, set_switch_cb, LV_EVENT_VALUE_CHANGED, (void *)(intptr_t)id);
+    s_setWidget[id] = sw;
+}
+
+// Tap button showing the current option; returns its label.
+static lv_obj_t *set_add_button(const char *label, lv_event_cb_t cb, void *user) {
+    lv_obj_t *r = set_row(label, false);
+    lv_obj_t *b = lv_obj_create(r);                     // plain obj: lighter than lv_btn + theme
+    lv_obj_remove_style_all(b);
+    lv_obj_add_style(b, &s_stBtn, 0);
+    lv_obj_add_style(b, &s_stBtnPr, LV_STATE_PRESSED);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user);
+    lv_obj_t *l = lv_label_create(b);
+    lv_obj_add_style(l, &s_stBtnLbl, 0);
+    lv_label_set_text(l, "-");
+    return l;
+}
+
+static void set_add_cycle(int id, const char *label) {
+    s_setWidget[id] = set_add_button(label, set_cycle_cb, (void *)(intptr_t)id);
+}
+
+// Der Inhalt (die Liste) entsteht erst, wenn die Seite ins Bild geschoben wird, und wird beim
+// Verlassen wieder gelöscht: ständig vorhanden würde er ~10-15 KB des LVGL-Heaps belegen, den
+// das Radar zum Zeichnen braucht. Panel und Titel bleiben (billig), damit beim Wischen sofort
+// etwas zu sehen ist.
+static lv_obj_t *s_setPanel = nullptr;
+
+static void settings_open(void) {
+    if (s_setList || !s_setPanel) return;
+    s_setList = lv_obj_create(s_setPanel);
+    lv_obj_remove_style_all(s_setList);
+    lv_obj_set_size(s_setList, s_bigText ? 340 : 310, 372);
+    lv_obj_align(s_setList, LV_ALIGN_CENTER, 0, 22);
+    lv_obj_set_flex_flow(s_setList, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(s_setList, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(s_setList, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_bottom(s_setList, 70, 0);   // the last rows can scroll up out of the round edge
+
+    set_add_slider(UI_SET_BRIGHT, "Helligkeit", 5, 255);
+    set_add_slider(UI_SET_VOLUME, "Lautstärke", 0, 100);
+    set_add_switch(UI_SET_MUTE, "Töne stumm");
+    set_add_cycle(UI_SET_ALERTS, "Hinweiston");
+    s_setThemeLbl = set_add_button("Design", set_theme_cb, nullptr);
+    set_add_cycle(UI_SET_UNITS, "Einheiten");
+    set_add_cycle(UI_SET_TRAIL, "Flugspuren");
+    set_add_switch(UI_SET_SWEEP, "Radar-Sweep");
+    set_add_switch(UI_SET_AIRPORTS, "Flughäfen");
+    set_add_switch(UI_SET_HIDEGROUND, "Am Boden ausblenden");
+    set_add_switch(UI_SET_CLOCK, "Uhr im Ruhezustand");
+
+    lv_obj_t *hint = lv_label_create(s_setList);
+    lv_obj_add_style(hint, &s_stHint, 0);
+    lv_label_set_text(hint, "Standort, Reichweite, WLAN und mehr:\ncapsuleradar.local");
+
+    ui_set_settings_volume(s_setShowVolume);
+    ui_settings_refresh();
+}
+
+static void settings_close(void) {
+    if (!s_setList) return;
+    lv_obj_del(s_setList);   // takes every row with it
+    s_setList = nullptr;
+    s_setVolRow = nullptr;
+    s_setThemeLbl = nullptr;
+    for (lv_obj_t *&w : s_setWidget) w = nullptr;
+}
+
+static void build_settings(void) {
+    set_styles_init();
+    lv_obj_clear_flag(s_tileSettings, LV_OBJ_FLAG_SCROLLABLE);
+    s_setPanel = make_round_panel(s_tileSettings);
+    make_tile_title(s_setPanel, "EINSTELLUNGEN");
+}
+
+// View index (0 radar, 1 list, 2 stats, 3 weather, 4 settings) -> tile column. The settings
+// tile sits left of the radar (column 0), so views 0..3 are columns 1..4.
 void ui_show_view(int idx) {
-    if (s_tv && idx >= 0 && idx <= 3) lv_obj_set_tile_id(s_tv, (uint32_t)idx, 0, LV_ANIM_OFF);
+    if (!s_tv || idx < 0 || idx > 4) return;
+    if (idx == 4) settings_open();
+    lv_obj_set_tile_id(s_tv, idx == 4 ? 0 : (uint32_t)(idx + 1), 0, LV_ANIM_OFF);
 }
 
 // ------------------------------------------------------------------- splash
@@ -1072,13 +1372,21 @@ void ui_create(void) {
     lv_obj_set_style_bg_opa(s_tv, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(s_tv, LV_SCROLLBAR_MODE_OFF);
 
-    s_tileRadar = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
-    s_tileList  = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);
-    s_tileStats = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
-    s_tileWeather = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_LEFT);
+    // Settings | Radar | List | Stats | Weather -- swipe right on the radar for the settings.
+    s_tileSettings = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
+    s_tileRadar = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);
+    s_tileList  = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
+    s_tileStats = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
+    s_tileWeather = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_LEFT);
     // Rebuild the list/stats with the latest data the moment they slide into view
     // (between polls they'd otherwise show whatever was there when last visible).
+    // Settings content lives only while its tile is (partly) on screen: build it as soon as a
+    // swipe starts to reveal column 0, drop it once the swipe settles on another tile.
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) {
+        if (lv_obj_get_scroll_x(s_tv) < SCREEN_W) settings_open();
+    }, LV_EVENT_SCROLL, nullptr);
+    lv_obj_add_event_cb(s_tv, [](lv_event_t *) {
+        if (lv_tileview_get_tile_act(s_tv) != s_tileSettings) settings_close();
         refresh_active_tile();
         if (s_viewChangedCb) s_viewChangedCb(active_view_index());   // let main remember the last view
     }, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1482,7 +1790,9 @@ void ui_create(void) {
     lv_label_set_text(s_weatherModeLbl, "3-TAGE-VORHERSAGE");
     lv_obj_center(s_weatherModeLbl);
 
-    lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_OFF);
+    build_settings();
+
+    lv_obj_set_tile_id(s_tv, 1, 0, LV_ANIM_OFF);   // start on the radar (column 1)
 
     ui_splash_show();   // branded boot splash on top (auto-fades)
 }

@@ -20,7 +20,10 @@
 > Konfigurationsseite (`capsuleradar.local`), Firmware-Update-Seite, WLAN-Einrichtungsportal
 > und Web-Flasher sind auf Deutsch. Damit Umlaute (ä ö ü ß) auf dem Display erscheinen,
 > bringt die Firmware eigene Montserrat-Schriften mit Latin-1-Zeichen mit (`src/fonts/`,
-> erzeugt mit `scripts/gen_fonts_de.sh`). Fertige Firmware-Dateien gibt es unter *Releases*;
+> erzeugt mit `scripts/gen_fonts_de.sh`). Neu: eine **Einstellungen-Seite am Gerät** -- auf dem
+> Radar nach rechts wischen (Helligkeit, Lautstärke, Töne, Hinweiston, Design, Einheiten,
+> Flugspuren, Radar-Sweep, Flughäfen, Flugzeuge am Boden, Uhr im Ruhezustand).
+> Fertige Firmware-Dateien gibt es unter *Releases*;
 > wie man sie aufspielt, steht in den Release-Notizen.
 
 A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75** — a round 466×466 AMOLED with capacitive touch. It pulls nearby aircraft from a free online feed over WiFi and plots them on a touch radar scope centered on your location, with live flight details and selectable visual skins.

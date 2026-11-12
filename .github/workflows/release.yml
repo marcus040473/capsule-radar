@@ -114,6 +114,7 @@ jobs:
           generate_release_notes: false
           body: |
             **Capsule Radar – deutsche Version.** Display, Konfigurationsseite und WLAN-Einrichtung auf Deutsch (mit Umlauten).
+            Neu: **Einstellungen direkt am Gerät** – auf dem Radar nach rechts wischen.
 
             Es werden drei Boards unterstützt. Die Datei muss zu Ihrem Board passen:
 

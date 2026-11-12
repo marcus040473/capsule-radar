@@ -1117,6 +1117,83 @@ static void handleGps() {   // auto-set the centre point from the LC76G GPS (-G 
     g_web.send(200, "text/plain", "ok");
 }
 
+// ---- Einstellungen-Seite am Gerät (ui.cpp, links vom Radar) ----
+// Dieselbe Wirkung und dieselben NVS-Schlüssel wie die Web-Handler oben. Läuft wie diese in
+// loop()/Kern 1 (LVGL-Ereignis), darf also LVGL und radar:: direkt anfassen.
+static void nvsPutInt(const char *k, int v)   { Preferences p; p.begin("capsuleradar", false); p.putInt(k, v);  p.end(); }
+static void nvsPutBool(const char *k, bool v) { Preferences p; p.begin("capsuleradar", false); p.putBool(k, v); p.end(); }
+
+static int deviceSettingGet(int id) {
+    switch (id) {
+        case UI_SET_BRIGHT:     return g_brightnessDay;
+        case UI_SET_VOLUME:     return g_volume;
+        case UI_SET_MUTE:       return g_muted ? 1 : 0;
+        case UI_SET_UNITS:      return g_units;
+        case UI_SET_TRAIL:      return g_trailLen;
+        case UI_SET_SWEEP:      return g_showSweep ? 1 : 0;
+        case UI_SET_AIRPORTS:   return g_showAirports ? 1 : 0;
+        case UI_SET_HIDEGROUND: return g_hideGround ? 1 : 0;
+        case UI_SET_CLOCK:      return g_clockOn ? 1 : 0;
+        case UI_SET_ALERTS:     return g_alertMode;
+        default:                return 0;
+    }
+}
+
+static void deviceSettingSet(int id, int v, bool save) {
+    switch (id) {
+        case UI_SET_BRIGHT:
+            g_brightnessDay = constrain(v, 5, 255);   // floor 5: 0 looks like a dead board
+            applyBrightness();
+            if (save) nvsPutInt("bright", g_brightnessDay);
+            break;
+        case UI_SET_VOLUME:
+            g_volume = constrain(v, 0, 100);
+            audio_set_volume(g_volume);
+            if (save) { nvsPutInt("vol", g_volume); if (!g_muted) audio_play(AUDIO_NEW); }   // hear the new level
+            break;
+        case UI_SET_MUTE:
+            g_muted = v != 0;
+            audio_set_muted(g_muted);
+            nvsPutBool("mute", g_muted);
+            break;
+        case UI_SET_UNITS:
+            g_units = constrain(v, 0, 2);
+            ui_set_units(g_units);
+            ui_set_range_km(g_settings.rangeKm);   // refresh the zoom-button label
+            ui_on_data_updated();                  // card/list/stats in the new units
+            nvsPutInt("units", g_units);
+            break;
+        case UI_SET_TRAIL:
+            g_trailLen = constrain(v, 0, 3);
+            radar::setTrailLength(g_trailLen);
+            nvsPutInt("traillen", g_trailLen);
+            break;
+        case UI_SET_SWEEP:
+            g_showSweep = v != 0;
+            radar::setSweepEnabled(g_showSweep);
+            nvsPutBool("sweep", g_showSweep);
+            break;
+        case UI_SET_AIRPORTS:
+            g_showAirports = v != 0;
+            radar::setAirportsEnabled(g_showAirports);
+            nvsPutBool("airports", g_showAirports);
+            break;
+        case UI_SET_HIDEGROUND:
+            g_hideGround = v != 0;
+            g_adsb.setHideGround(g_hideGround);   // applies from the next feed poll
+            nvsPutBool("hideground", g_hideGround);
+            break;
+        case UI_SET_CLOCK:
+            g_clockOn = v != 0;                   // loop() starts or ends it on its next pass
+            nvsPutBool("clock", g_clockOn);
+            break;
+        case UI_SET_ALERTS:
+            g_alertMode = constrain(v, 0, 2);
+            nvsPutInt("alertmode", g_alertMode);
+            break;
+    }
+}
+
 // ---- browser OTA: upload an app .bin over WiFi and self-flash ----
 static void handleUpdatePage() {
     g_web.send(200, "text/html",
@@ -1249,6 +1326,7 @@ void setup() {
         // remembering it; NVS write only when the view actually changes.
         ui_show_view(g_lastView);
         ui_set_view_changed_cb([](int idx) {
+            if (idx == 4) return;   // the settings page is never the start view after a reboot
             if (idx == g_lastView) return;
             g_lastView = idx;
             Preferences q;
@@ -1262,6 +1340,8 @@ void setup() {
         g_rotation = display::rotation();
     }
     radar::setThemeChangedCb(saveTheme);
+    ui_set_settings_volume(!BOARD_HAS_BUZZER);   // a buzzer has no level (like the web page's slider)
+    ui_set_settings_cb(deviceSettingGet, deviceSettingSet);   // the settings page left of the radar
     ui_set_range_cb(onRangeChange);              // on-screen zoom button
     ui_set_units(g_units);                       // apply saved unit preset
     ui_set_temp_unit(g_tempUnit);                // and the weather temperature unit

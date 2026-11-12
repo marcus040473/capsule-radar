@@ -165,6 +165,19 @@ static void save_shot(const char *prefix, const char *name) {
     printf("[sim] saved %s\n", path);
 }
 
+// Settings page mock (the device keeps these in main.cpp + NVS).
+static int s_simSet[UI_SET_COUNT] = { 180, 60, 0, 0, 2, 1, 1, 0, 1, 2 };
+static int  sim_setting_get(int id) { return (id >= 0 && id < UI_SET_COUNT) ? s_simSet[id] : 0; }
+static void sim_setting_set(int id, int v, bool save) {
+    if (id < 0 || id >= UI_SET_COUNT) return;
+    s_simSet[id] = v;
+    if (id == UI_SET_UNITS) { ui_set_units(v); ui_on_data_updated(); }
+    if (id == UI_SET_TRAIL) radar::setTrailLength(v);
+    if (id == UI_SET_SWEEP) radar::setSweepEnabled(v != 0);
+    if (id == UI_SET_AIRPORTS) radar::setAirportsEnabled(v != 0);
+    printf("[sim] setting %d = %d%s\n", id, v, save ? " (saved)" : "");
+}
+
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
 
@@ -217,6 +230,7 @@ int main(int argc, char **argv) {
     ui_set_range_cb(sim_range_cb);   // on-screen zoom button
     ui_set_range_km(RANGE_KM_DEFAULT);
     ui_set_poweroff_cb([]() {});   // mock: represent a PMIC-fitted board (shows the Stats power-off button)
+    ui_set_settings_cb(sim_setting_get, sim_setting_set);   // mock settings page values
     mock_init();
     radar::update(g_mockAcs, g_set);
     ui_on_data_updated();
@@ -371,7 +385,7 @@ int main(int argc, char **argv) {
             int ow, oh;
             SDL_GetRendererOutputSize(s_ren, &ow, &oh);
             struct Shot { const char *name; int view; int theme; bool forecast; int units; };
-            const Shot shots[9] = {
+            const Shot shots[10] = {
                 { "radar",  0, THEME_PHOSPHOR, false, 0 },
                 { "orb", 0, THEME_ORB, false, 0 },
                 { "amber",  0, THEME_AMBER, false, 0 },
@@ -381,8 +395,9 @@ int main(int argc, char **argv) {
                 { "stats",  2, THEME_PHOSPHOR, false, 0 },
                 { "weather",3, THEME_PHOSPHOR, false, 0 },
                 { "forecast",3, THEME_PHOSPHOR, true, 0 },
+                { "settings",4, THEME_PHOSPHOR, false, 0 },
             };
-            for (int v = 0; v < 9; ++v) {
+            for (int v = 0; v < 10; ++v) {
                 ui_set_units(shots[v].units);
                 ui_set_range_km(g_set.rangeKm);   // like handleUnits() on the device: zoom label,
                 ui_on_data_updated();             // then the card/list in the new units
