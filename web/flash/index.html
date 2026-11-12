@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -44,24 +44,24 @@
 <body>
   <div class="radar"></div>
   <h1>Capsule Radar</h1>
-  <div class="sub">Live ADS-B aircraft radar · Waveshare ESP32-S3 round AMOLED boards</div>
+  <div class="sub">Live-ADS-B-Flugradar · deutsche Version · runde Waveshare-ESP32-S3-AMOLED-Boards</div>
 
   <div class="card">
-    <p style="margin-top:0">Flash the firmware straight from your browser — no toolchain, no PlatformIO.</p>
+    <p style="margin-top:0">Firmware direkt aus dem Browser aufspielen – ohne Toolchain, ohne PlatformIO.</p>
     <div class="boards" id="boards">
       <label class="board sel"><input type="radio" name="board" value="manifest.json" checked>
-        <b>1.75&Prime;</b><span>ESP32-S3-Touch-AMOLED-1.75 (also -G)</span></label>
+        <b>1.75&Prime;</b><span>ESP32-S3-Touch-AMOLED-1.75 (auch -G)</span></label>
       <label class="board"><input type="radio" name="board" value="manifest-amoled143.json">
         <b>1.43&Prime;</b><span>ESP32-S3-Touch-AMOLED-1.43</span></label>
     </div>
     <esp-web-install-button id="install" manifest="manifest.json">
-      <button slot="activate">⚡ Install Capsule Radar</button>
-      <span slot="unsupported">Use Chrome or Edge on desktop (Web Serial required).</span>
-      <span slot="not-allowed">Serve this page over HTTPS to flash.</span>
+      <button slot="activate">⚡ Capsule Radar installieren</button>
+      <span slot="unsupported">Bitte Chrome oder Edge am Computer verwenden (Web Serial nötig).</span>
+      <span slot="not-allowed">Zum Flashen muss diese Seite über HTTPS geladen werden.</span>
     </esp-web-install-button>
-    <div class="ver">Installs firmware <b>v__FWVER__</b></div>
-    <div class="note" style="margin-top:10px">Pick the board you actually have — the wrong image
-      boots with a <b>black screen</b> (harmless: flash the right one to fix it).</div>
+    <div class="ver">Installiert Firmware <b>v__FWVER__</b></div>
+    <div class="note" style="margin-top:10px">Wählen Sie das Board, das Sie wirklich haben – mit dem falschen
+      Image bleibt der <b>Bildschirm schwarz</b> (harmlos: einfach das richtige aufspielen).</div>
   </div>
   <script>
     document.querySelectorAll('input[name=board]').forEach(function (r) {
@@ -75,17 +75,17 @@
 
   <div class="card">
     <ol>
-      <li>Plug the board into your computer with a <b>USB-C data cable</b>.</li>
-      <li>Click <b>Install</b> and pick the <code>USB JTAG/serial</code> (or <code>USB Serial</code>) port.</li>
-      <li>Choose <b>Erase device + Install</b> on first flash.</li>
-      <li>When it reboots, join the <b>CapsuleRadar-Setup</b> WiFi from your phone to enter your network and home location.</li>
-      <li>Fine-tune anything later at <code>http://capsuleradar.local/</code>.</li>
+      <li>Board mit einem <b>USB-C-Datenkabel</b> an den Computer anschließen.</li>
+      <li>Auf <b>Installieren</b> klicken und den Anschluss <code>USB JTAG/serial</code> (oder <code>USB Serial</code>) wählen.</li>
+      <li>Beim ersten Mal <b>Erase device</b> (Gerät löschen) + <b>Install</b> wählen.</li>
+      <li>Nach dem Neustart mit dem Handy das WLAN <b>CapsuleRadar-Setup</b> verbinden und Ihr WLAN eintragen.</li>
+      <li>Standort und alles Weitere danach unter <code>http://capsuleradar.local/</code> einstellen.</li>
     </ol>
   </div>
 
   <div class="note">
-    Educational / non-commercial project · data from airplanes.live &amp; adsbdb.com<br>
-    Source &amp; build instructions: <a href="https://github.com/socquique/capsule-radar">GitHub repository</a>
+    Nicht-kommerzielles Hobbyprojekt · Daten von airplanes.live, adsb.fi, adsb.lol &amp; adsbdb.com<br>
+    Deutsche Übersetzung von <a href="https://github.com/socquique/capsule-radar">Capsule Radar</a> (MIT-Lizenz)
   </div>
 </body>
 </html>

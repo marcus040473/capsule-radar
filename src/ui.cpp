@@ -72,7 +72,7 @@ static const lv_font_t *F14() { return s_bigText ? &lv_font_montserrat_18 : &lv_
 static const lv_font_t *F16() { return s_bigText ? &lv_font_montserrat_20 : &lv_font_montserrat_16; }
 
 static void fmt_alt(char *b, size_t n, float ft, bool gnd) {
-    if (gnd)            snprintf(b, n, "GND");
+    if (gnd)            snprintf(b, n, "Boden");
     else if (s_units == 1) snprintf(b, n, "%.0f m",  ft * 0.3048f);
     else                snprintf(b, n, "%.0f ft", ft);
 }
@@ -109,7 +109,7 @@ static float weather_wind(float kmh) {
 }
 static const char *weather_wind_unit(void) { return s_units == 0 ? "kt" : (s_units == 2 ? "mph" : "km/h"); }
 static const char *cardinal(float deg) {
-    static const char *p[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    static const char *p[] = {"N", "NO", "O", "SO", "S", "SW", "W", "NW"};
     int i = ((int)(deg + 22.5f) / 45) & 7;
     return p[i];
 }
@@ -181,8 +181,8 @@ static void refresh_card(void) {
     else                        snprintf(hdgS, sizeof(hdgS), "%03.0f", in.track);
 
     char left[96], right[96];
-    snprintf(left,  sizeof(left),  "ALT  %s\nSPD  %s\nDIST %.1f %s", altS, spdS, dist_val(in.distKm), dist_unit());
-    snprintf(right, sizeof(right), "V/S  %s\nHDG  %s\nSQK  %s", vsS, hdgS, sqS);
+    snprintf(left,  sizeof(left),  "HÖHE  %s\nTEMPO %s\nENTF  %.1f %s", altS, spdS, dist_val(in.distKm), dist_unit());
+    snprintf(right, sizeof(right), "STEIG %s\nKURS  %s\nSQK   %s", vsS, hdgS, sqS);
     lv_label_set_text(s_cardL, left);
     lv_label_set_text(s_cardR, right);
 
@@ -197,11 +197,11 @@ static void refresh_card(void) {
     } else if (route_get(in.call, rfrom, sizeof(rfrom), rto, sizeof(rto))) {
         char rt[96];
         if (rfrom[0] || rto[0]) snprintf(rt, sizeof(rt), "%s -> %s", rfrom[0] ? rfrom : "?", rto[0] ? rto : "?");
-        else                    snprintf(rt, sizeof(rt), "Route unavailable");
+        else                    snprintf(rt, sizeof(rt), "Route unbekannt");
         fold_ascii(rt);
         lv_label_set_text(s_cardRoute, rt);
     } else {
-        lv_label_set_text(s_cardRoute, "Looking up route...");     // pending: lookup in flight
+        lv_label_set_text(s_cardRoute, "Route wird gesucht...");     // pending: lookup in flight
     }
 
     // aircraft photo (planespotters), shown above the card when one is available
@@ -217,7 +217,7 @@ static void refresh_card(void) {
         lv_obj_invalidate(s_photo);
         if (s_photoCredit) {
             char c[52];
-            snprintf(c, sizeof(c), "Photo: %s", pcred[0] ? pcred : "planespotters.net");
+            snprintf(c, sizeof(c), "Foto: %s", pcred[0] ? pcred : "planespotters.net");
             lv_label_set_text(s_photoCredit, c);
             lv_obj_align_to(s_photoCredit, s_photo, LV_ALIGN_OUT_BOTTOM_MID, 0, 1);
             lv_obj_clear_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
@@ -229,7 +229,7 @@ static void refresh_card(void) {
         lv_obj_add_flag(s_photo, LV_OBJ_FLAG_HIDDEN);
         if (s_photoCredit) {
             const bool done = in.hex[0] && photo_done(in.hex);
-            lv_label_set_text(s_photoCredit, done ? "No photo available" : "Loading photo...");
+            lv_label_set_text(s_photoCredit, done ? "Kein Foto verfügbar" : "Foto wird geladen...");
             lv_obj_align(s_photoCredit, LV_ALIGN_CENTER, 0, -104);   // where the photo would sit
             lv_obj_clear_flag(s_photoCredit, LV_OBJ_FLAG_HIDDEN);
         }
@@ -266,7 +266,7 @@ static void poweroff_restore_cb(lv_timer_t *t) {
     s_offRestoreTimer = nullptr;
     lv_timer_del(t);
     s_offFired = false;
-    if (s_offLbl) lv_label_set_text(s_offLbl, LV_SYMBOL_POWER " Hold to power off");
+    if (s_offLbl) lv_label_set_text(s_offLbl, LV_SYMBOL_POWER " Halten zum Ausschalten");
     if (s_offRing) lv_arc_set_end_angle(s_offRing, 0);
 }
 
@@ -305,19 +305,19 @@ static void poweroff_cb(lv_event_t *e) {
         const int32_t deg = off_ring_deg();
         lv_anim_del(s_offRing, off_ring_anim_cb);
         s_offT0 = lv_tick_get() - (uint32_t)(POWEROFF_HOLD_MS * deg / 360); s_offFired = false;
-        lv_label_set_text(s_offLbl, "Keep holding...");
+        lv_label_set_text(s_offLbl, "Weiter halten...");
     } else if (c == LV_EVENT_PRESSING && !s_offFired) {
         const uint32_t held = lv_tick_elaps(s_offT0);
         off_ring_set((int32_t)(360 * held / POWEROFF_HOLD_MS));
         if (held >= POWEROFF_HOLD_MS) {
             s_offFired = true;
-            lv_label_set_text(s_offLbl, "Powering off");
+            lv_label_set_text(s_offLbl, "Wird ausgeschaltet");
             if (s_poweroffCb) s_poweroffCb();
             s_offRestoreTimer = lv_timer_create(poweroff_restore_cb, POWEROFF_RESTORE_MS, nullptr);
             lv_timer_set_repeat_count(s_offRestoreTimer, 1);
         }
     } else if ((c == LV_EVENT_RELEASED || c == LV_EVENT_PRESS_LOST) && !s_offFired) {
-        lv_label_set_text(s_offLbl, LV_SYMBOL_POWER " Hold to power off");
+        lv_label_set_text(s_offLbl, LV_SYMBOL_POWER " Halten zum Ausschalten");
         off_ring_unwind();
     }
 }
@@ -508,10 +508,10 @@ void ui_set_gps(int state, int sats, float altM) {
             char altS[16];
             if (s_units == 1) snprintf(altS, sizeof(altS), "%.0f m",  altM);
             else              snprintf(altS, sizeof(altS), "%.0f ft", altM * 3.28084f);
-            snprintf(s, sizeof(s), LV_SYMBOL_GPS " fix  " LV_SYMBOL_BULLET "  %d sats  " LV_SYMBOL_BULLET "  %s", sats, altS);
+            snprintf(s, sizeof(s), LV_SYMBOL_GPS " Fix  " LV_SYMBOL_BULLET "  %d Sat.  " LV_SYMBOL_BULLET "  %s", sats, altS);
         }
-        else if (fix) snprintf(s, sizeof(s), LV_SYMBOL_GPS " fix  " LV_SYMBOL_BULLET "  %d sats", sats);
-        else     snprintf(s, sizeof(s), LV_SYMBOL_GPS " acquiring  (%d sats)", sats);
+        else if (fix) snprintf(s, sizeof(s), LV_SYMBOL_GPS " Fix  " LV_SYMBOL_BULLET "  %d Sat.", sats);
+        else     snprintf(s, sizeof(s), LV_SYMBOL_GPS " suche  (%d Sat.)", sats);
         lv_label_set_text(s_statsGps, s);
         lv_obj_set_style_text_color(s_statsGps, col, 0);
     }
@@ -634,13 +634,13 @@ static void build_stats(void) {
     fmt_alt(altH, sizeof(altH), (highest > -1e8f) ? highest : 0.0f, false);
     char st[260];
     snprintf(st, sizeof(st),
-             "Aircraft   %d\n"
-             "Emergency  %d\n"
-             "Nearest    %s\n"
-             "           %.1f %s\n"
-             "Highest    %s\n"
-             "Range      %.0f %s\n"
-             "Feed       %s",
+             "Flugzeuge    %d\n"
+             "Notfälle     %d\n"
+             "Nächstes     %s\n"
+             "             %.1f %s\n"
+             "Höchstes     %s\n"
+             "Reichweite   %.0f %s\n"
+             "Datenquelle  %s",
              n, emg, n ? nearestCall : "-", dist_val(n ? nearest : 0.0f), dist_unit(),
              altH, dist_val(s_rangeKm), dist_unit(), s_feedHost);
     lv_label_set_text(s_statsLbl, st);
@@ -650,9 +650,9 @@ static void build_weather(void) {
     if (!s_weatherNow || !s_weatherMeta || !s_weatherDays || !s_wxFooter) return;
     WeatherSnapshot w;
     if (!weather_get(w)) {
-        lv_label_set_text(s_weatherNow, "Forecast unavailable");
-        lv_label_set_text(s_weatherMeta, "Waiting for WiFi data...");
-        lv_label_set_text(s_wxFooter, "WEATHER DATA PENDING");
+        lv_label_set_text(s_weatherNow, "Keine Vorhersage");
+        lv_label_set_text(s_weatherMeta, "Warte auf WLAN-Daten...");
+        lv_label_set_text(s_wxFooter, "WETTERDATEN AUSSTEHEND");
         lv_label_set_text(s_weatherDays, "");
     } else {
         char now[96];
@@ -660,7 +660,7 @@ static void build_weather(void) {
                  weather_temp_unit(), weather_condition(w.code));
         lv_label_set_text(s_weatherNow, now);
         char meta[128];
-        snprintf(meta, sizeof(meta), "Feels %.0f %s   Humidity %d%%\nWind %.0f %s  %s   Updated %s",
+        snprintf(meta, sizeof(meta), "Gefühlt %.0f %s   Feuchte %d%%\nWind %.0f %s  %s   Stand %s",
                  weather_temp(w.feelsC), weather_temp_unit(), w.humidity,
                  weather_wind(w.windKmh), weather_wind_unit(), cardinal((float)w.windDeg), w.updated);
         lv_label_set_text(s_weatherMeta, meta);
@@ -670,7 +670,7 @@ static void build_weather(void) {
                  weather_temp_unit(), weather_condition(w.code));
         lv_label_set_text(s_wxFooter, footer);
         char wxmeta[96];
-        snprintf(wxmeta, sizeof(wxmeta), "WIND %s %.0f %s   HUM %d%%",
+        snprintf(wxmeta, sizeof(wxmeta), "WIND %s %.0f %s   FEUCHTE %d%%",
                  cardinal((float)w.windDeg), weather_wind(w.windKmh), weather_wind_unit(), w.humidity);
         lv_label_set_text(s_wxMeta, wxmeta);
 
@@ -684,7 +684,7 @@ static void build_weather(void) {
         char wind[28]; snprintf(wind, sizeof(wind), "%s %.0f %s", cardinal((float)w.windDeg),
                                 weather_wind(w.windKmh), weather_wind_unit());
         lv_label_set_text(s_fcMetricValue[2], wind);
-        char updated[24]; snprintf(updated, sizeof(updated), "UPDATED %s", w.updated);
+        char updated[24]; snprintf(updated, sizeof(updated), "STAND %s", w.updated);
         lv_label_set_text(s_fcUpdated, updated);
 
         for (int col = 0; col < 3; ++col) {
@@ -696,7 +696,7 @@ static void build_weather(void) {
                 snprintf(temps, sizeof(temps), "%.0f / %.0f %s",
                          weather_temp(w.days[i].tempMaxC), weather_temp(w.days[i].tempMinC), weather_temp_unit());
                 lv_label_set_text(s_fcDayTemp[col], temps);
-                char chance[20]; snprintf(chance, sizeof(chance), "RAIN %d%%", w.days[i].rainChance);
+                char chance[20]; snprintf(chance, sizeof(chance), "REGEN %d%%", w.days[i].rainChance);
                 lv_label_set_text(s_fcDayRain[col], chance);
             } else {
                 lv_label_set_text(s_fcDay[col], "-");
@@ -739,7 +739,7 @@ static void build_weather(void) {
             char apt[64];
             snprintf(apt, sizeof(apt), "O  %s   %.0f %s %s", iata, dist_val(d), dist_unit(), cardinal(b));
             lv_label_set_text(s_wxAirport, apt);
-        } else lv_label_set_text(s_wxAirport, "RADAR CENTRE");
+        } else lv_label_set_text(s_wxAirport, "RADARMITTE");
         char stamp[6] = "--:--";
         time_t ft = (time_t)frameTime; struct tm ti;
         if (frameTime && localtime_r(&ft, &ti)) snprintf(stamp, sizeof(stamp), "%02d:%02d", ti.tm_hour, ti.tm_min);
@@ -749,8 +749,8 @@ static void build_weather(void) {
     } else {
         if (s_wxCanvas) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_wxAirport, "RADAR CENTRE");
-        lv_label_set_text(s_wxAttrib, cloudMode ? "WAITING FOR SATELLITE DATA" : "WAITING FOR RADAR DATA");
+        lv_label_set_text(s_wxAirport, "RADARMITTE");
+        lv_label_set_text(s_wxAttrib, cloudMode ? "WARTE AUF SATELLITENDATEN" : "WARTE AUF RADARDATEN");
     }
 
     lv_obj_t *forecastObjs[] = {
@@ -775,11 +775,11 @@ static void build_weather(void) {
     if (!forecastMode && !haveImage) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(s_wxRange, cloudMode ? "200 KM" : "75 KM");
     lv_label_set_text(s_weatherModeLbl,
-        s_weatherMode == WEATHER_RADAR ? "CLOUDS" :
-        s_weatherMode == WEATHER_CLOUDS ? "3-DAY FORECAST" : "WX RADAR");
+        s_weatherMode == WEATHER_RADAR ? "WOLKEN" :
+        s_weatherMode == WEATHER_CLOUDS ? "3-TAGE-VORHERSAGE" : "WETTERRADAR");
     if (s_weatherTitle) lv_label_set_text(s_weatherTitle,
-        s_weatherMode == WEATHER_RADAR ? "WX RADAR" :
-        s_weatherMode == WEATHER_CLOUDS ? "SAT CLOUDS" : "WEATHER");
+        s_weatherMode == WEATHER_RADAR ? "WETTERRADAR" :
+        s_weatherMode == WEATHER_CLOUDS ? "SAT-WOLKEN" : "WETTER");
 }
 
 // Registered once, on the whole weather panel (see ui_create) -- the mode pill and the
@@ -1052,7 +1052,7 @@ void ui_splash_show(void) {
     lv_obj_align(title, LV_ALIGN_CENTER, 0, 118);
 
     lv_obj_t *sub = lv_label_create(cont);
-    lv_label_set_text(sub, "Live ADS-B radar");
+    lv_label_set_text(sub, "Live-ADS-B-Radar");
     lv_obj_set_style_text_font(sub, F14(), 0);
     lv_obj_set_style_text_color(sub, UI_SOFT, 0);
     lv_obj_align(sub, LV_ALIGN_CENTER, 0, 150);
@@ -1166,7 +1166,7 @@ void ui_create(void) {
     // The theme hold's hint (radar_pressing_cb), styled like the zoom button and centred like
     // the detail card. Opaque: while it shows, it sits over the middle of an open card.
     s_holdHint = lv_label_create(s_tileRadar);
-    lv_label_set_text(s_holdHint, "Lift to change theme");
+    lv_label_set_text(s_holdHint, "Loslassen: Design wechseln");
     lv_obj_set_style_text_font(s_holdHint, F14(), 0);
     lv_obj_set_style_text_color(s_holdHint, UI_GREEN, 0);
     lv_obj_set_style_bg_color(s_holdHint, UI_PANEL, 0);
@@ -1192,7 +1192,7 @@ void ui_create(void) {
 
     // --- list tile (circular panel, clipped to the round screen) ---
     lv_obj_t *lp = make_round_panel(s_tileList);
-    make_tile_title(lp, "AIRCRAFT");
+    make_tile_title(lp, "FLUGZEUGE");
     s_list = lv_list_create(lp);
     lv_obj_set_size(s_list, s_bigText ? 340 : 300, 372);   // wider rows so big-font distances don't clip
     lv_obj_align(s_list, LV_ALIGN_CENTER, 0, 22);
@@ -1207,11 +1207,11 @@ void ui_create(void) {
 
     // --- stats tile (circular panel) ---
     lv_obj_t *sp = make_round_panel(s_tileStats);
-    make_tile_title(sp, "STATS");
+    make_tile_title(sp, "STATISTIK");
     s_statsLbl = lv_label_create(sp);
     lv_obj_set_style_text_font(s_statsLbl, F16(), 0);
     lv_obj_set_style_text_color(s_statsLbl, UI_SOFT, 0);
-    lv_label_set_text(s_statsLbl, "Aircraft   0");
+    lv_label_set_text(s_statsLbl, "Flugzeuge    0");
     lv_obj_align(s_statsLbl, LV_ALIGN_CENTER, 0, -16);
 
     s_statsGps = lv_label_create(sp);               // GPS status line (hidden unless GPS is on)
@@ -1232,7 +1232,7 @@ void ui_create(void) {
 
     // power off (hold) -- top of the Stats view, under the title
     s_offBtn = lv_btn_create(sp);
-    lv_obj_set_size(s_offBtn, 210, 40);
+    lv_obj_set_size(s_offBtn, s_bigText ? 270 : 230, 40);   // DE: longer label than "Hold to power off"
     lv_obj_set_ext_click_area(s_offBtn, 12);
     lv_obj_align(s_offBtn, LV_ALIGN_CENTER, 0, -150);
     lv_obj_set_style_radius(s_offBtn, 18, 0);
@@ -1243,7 +1243,7 @@ void ui_create(void) {
     lv_obj_clear_flag(s_offBtn, LV_OBJ_FLAG_SCROLL_CHAIN);
     lv_obj_add_event_cb(s_offBtn, poweroff_cb, LV_EVENT_ALL, NULL);
     s_offLbl = lv_label_create(s_offBtn);
-    lv_label_set_text(s_offLbl, LV_SYMBOL_POWER " Hold to power off");
+    lv_label_set_text(s_offLbl, LV_SYMBOL_POWER " Halten zum Ausschalten");
     lv_obj_set_style_text_font(s_offLbl, F14(), 0);
     lv_obj_set_style_text_color(s_offLbl, UI_EMERG, 0);
     lv_obj_center(s_offLbl);
@@ -1286,7 +1286,7 @@ void ui_create(void) {
     lv_obj_add_flag(wp, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(wp, weather_mode_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_style_bg_color(wp, lv_color_black(), 0); // hide square radar-tile bounds on AMOLED
-    s_weatherTitle = make_tile_title(wp, "WX RADAR");
+    s_weatherTitle = make_tile_title(wp, "WETTERRADAR");
     lv_obj_set_style_bg_color(s_weatherTitle, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_weatherTitle, 170, 0);
     lv_obj_set_style_pad_left(s_weatherTitle, 8, 0);
@@ -1299,7 +1299,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_weatherNow, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_weatherNow, UI_INK, 0);
     lv_obj_set_style_text_align(s_weatherNow, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_weatherNow, "Forecast unavailable");
+    lv_label_set_text(s_weatherNow, "Keine Vorhersage");
     lv_obj_align(s_weatherNow, LV_ALIGN_TOP_MID, 0, 64);
 
     s_weatherMeta = lv_label_create(wp);
@@ -1307,7 +1307,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_weatherMeta, F14(), 0);
     lv_obj_set_style_text_color(s_weatherMeta, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_weatherMeta, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_weatherMeta, "Waiting for WiFi data...");
+    lv_label_set_text(s_weatherMeta, "Warte auf WLAN-Daten...");
     lv_obj_align(s_weatherMeta, LV_ALIGN_TOP_MID, 0, 150);
 
     s_weatherDays = lv_label_create(wp);
@@ -1332,7 +1332,7 @@ void ui_create(void) {
     lv_obj_set_style_pad_left(s_wxAirport, 6, 0);
     lv_obj_set_style_pad_right(s_wxAirport, 6, 0);
     lv_obj_set_style_radius(s_wxAirport, 6, 0);
-    lv_label_set_text(s_wxAirport, "RADAR CENTRE");
+    lv_label_set_text(s_wxAirport, "RADARMITTE");
     lv_obj_align(s_wxAirport, LV_ALIGN_TOP_MID, 0, 46);
 
     s_wxCanvas = lv_canvas_create(wp);
@@ -1346,7 +1346,7 @@ void ui_create(void) {
     s_wxStatus = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxStatus, F14(), 0);
     lv_obj_set_style_text_color(s_wxStatus, UI_DIM, 0);
-    lv_label_set_text(s_wxStatus, "ACQUIRING WX RADAR...");
+    lv_label_set_text(s_wxStatus, "LADE WETTERRADAR...");
     lv_obj_align(s_wxStatus, LV_ALIGN_TOP_MID, 0, 222);
 
     const int ringSize[3] = { 360, 240, 120 };
@@ -1382,7 +1382,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxFooter, F16(), 0);
     lv_obj_set_style_text_color(s_wxFooter, UI_INK, 0);
     lv_obj_set_style_text_align(s_wxFooter, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_wxFooter, "WEATHER DATA PENDING");
+    lv_label_set_text(s_wxFooter, "WETTERDATEN AUSSTEHEND");
     lv_obj_align(s_wxFooter, LV_ALIGN_TOP_MID, 0, 326);
     lv_obj_set_style_bg_color(s_wxFooter, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_wxFooter, 185, 0);
@@ -1402,7 +1402,7 @@ void ui_create(void) {
     s_wxAttrib = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxAttrib, F12(), 0);
     lv_obj_set_style_text_color(s_wxAttrib, UI_DIM, 0);
-    lv_label_set_text(s_wxAttrib, "WAITING FOR RADAR DATA");
+    lv_label_set_text(s_wxAttrib, "WARTE AUF RADARDATEN");
     lv_obj_align(s_wxAttrib, LV_ALIGN_TOP_MID, 0, 376);
     lv_obj_set_style_bg_color(s_wxAttrib, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s_wxAttrib, 170, 0);
@@ -1413,15 +1413,15 @@ void ui_create(void) {
     s_fcCurrent = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcCurrent, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_fcCurrent, UI_INK, 0);
-    lv_label_set_text(s_fcCurrent, "-- C");
+    lv_label_set_text(s_fcCurrent, "-- \xC2\xB0" "C");
     lv_obj_align(s_fcCurrent, LV_ALIGN_TOP_MID, 0, 68);
     s_fcCondition = lv_label_create(wp);
     lv_obj_set_style_text_font(s_fcCondition, F16(), 0);
     lv_obj_set_style_text_color(s_fcCondition, UI_SOFT, 0);
-    lv_label_set_text(s_fcCondition, "Waiting for data");
+    lv_label_set_text(s_fcCondition, "Warte auf Daten");
     lv_obj_align(s_fcCondition, LV_ALIGN_TOP_MID, 0, 105);
 
-    const char *metricNames[3] = { "FEELS", "HUMIDITY", "WIND" };
+    const char *metricNames[3] = { "GEFÜHLT", "FEUCHTE", "WIND" };
     const int colX[3] = { -122, 0, 122 };
     for (int i = 0; i < 3; ++i) {
         s_fcMetricName[i] = lv_label_create(wp);
@@ -1479,7 +1479,7 @@ void ui_create(void) {
     s_weatherModeLbl = lv_label_create(s_weatherModeBtn);
     lv_obj_set_style_text_font(s_weatherModeLbl, F12(), 0);
     lv_obj_set_style_text_color(s_weatherModeLbl, UI_GREEN, 0);
-    lv_label_set_text(s_weatherModeLbl, "3-DAY FORECAST");
+    lv_label_set_text(s_weatherModeLbl, "3-TAGE-VORHERSAGE");
     lv_obj_center(s_weatherModeLbl);
 
     lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_OFF);

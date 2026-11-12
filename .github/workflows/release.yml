@@ -110,21 +110,26 @@ jobs:
             CapsuleRadar-ota-amoled143.bin
             CapsuleRadar-esp32s3-lcd21.bin
             CapsuleRadar-ota-lcd21.bin
-          generate_release_notes: true
+          name: Capsule Radar ${{ inputs.tag || github.ref_name }} (Deutsch)
+          generate_release_notes: false
           body: |
-            Three boards are supported. Match the file suffix to your hardware:
+            **Capsule Radar – deutsche Version.** Display, Konfigurationsseite und WLAN-Einrichtung auf Deutsch (mit Umlauten).
 
-            **First flash (USB):** `*-esp32s3*.bin` — the full merged image (offset `0x0`).
-            - Browser, no toolchain: https://socquique.github.io/capsule-radar/
-            - Or: `esptool.py --chip esp32s3 write_flash 0x0 <file>`
+            Es werden drei Boards unterstützt. Die Datei muss zu Ihrem Board passen:
 
-            **Update over WiFi (no cable):** `CapsuleRadar-ota*.bin` — the app-only image.
-            Open `http://capsuleradar.local/update` on the device and upload the file
-            matching your board. (Do **not** upload the merged image there.)
+            | Board | Erstinstallation (USB) | Update über WLAN |
+            |---|---|---|
+            | **ESP32-S3-Touch-AMOLED-1.75** (auch -G) | `CapsuleRadar-esp32s3.bin` | `CapsuleRadar-ota.bin` |
+            | **ESP32-S3-Touch-AMOLED-1.43** | `CapsuleRadar-esp32s3-amoled143.bin` | `CapsuleRadar-ota-amoled143.bin` |
+            | **ESP32-S3-Touch-LCD-2.1** (experimentell) | `CapsuleRadar-esp32s3-lcd21.bin` | `CapsuleRadar-ota-lcd21.bin` |
 
-            **Which file?** Unsuffixed files are for the reference **ESP32-S3-Touch-AMOLED-1.75**.
-            Files with `amoled143` in the name are for the **ESP32-S3-Touch-AMOLED-1.43**.
-            Files with `lcd21` in the name are for the **ESP32-S3-Touch-LCD-2.1** (experimental).
-            The boards have completely different pin maps — the wrong image gives a
-            black screen, so check your board before flashing. (The browser flasher
-            currently supports the AMOLED boards.)
+            **Erstinstallation per USB-Kabel:** die Datei `CapsuleRadar-esp32s3*.bin` (komplettes Image, Adresse `0x0`).
+            - Im Browser (Chrome/Edge): https://espressif.github.io/esptool-js/ → *Connect* → Flash Address `0x0`, Datei wählen → *Program*
+            - Oder: `esptool.py --chip esp32s3 write_flash 0x0 <datei>`
+
+            **Update über WLAN (ohne Kabel, wenn schon Capsule Radar drauf ist):** die Datei `CapsuleRadar-ota*.bin`.
+            `http://capsuleradar.local/update` öffnen und die zum Board passende Datei hochladen. (Dort **nicht** das komplette Image hochladen.)
+
+            Mit dem falschen Image bleibt der Bildschirm schwarz – harmlos, einfach das richtige aufspielen.
+
+            Basiert auf [socquique/capsule-radar](https://github.com/socquique/capsule-radar) (MIT-Lizenz).

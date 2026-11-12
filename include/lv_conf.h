@@ -77,12 +77,20 @@
 /*==================
    FONTS
  *==================*/
-#define LV_FONT_MONTSERRAT_12 1
-#define LV_FONT_MONTSERRAT_14 1
-#define LV_FONT_MONTSERRAT_16 1
-#define LV_FONT_MONTSERRAT_18 1   /* large-text mode: 14 -> 18 */
-#define LV_FONT_MONTSERRAT_20 1   /* large-text mode: 16 -> 20 */
-#define LV_FONT_MONTSERRAT_28 1
+/* Deutsche Version: LVGLs eingebaute Montserrat-Schriften enthalten nur ASCII. Statt
+   ihrer werden gleichnamige Schriften aus src/fonts/ gebaut, die zusaetzlich Latin-1
+   (Umlaute, scharfes S, Gradzeichen) enthalten -- erzeugt von scripts/gen_fonts_de.sh.
+   Die Groessen bleiben dieselben: 18/20 fuer den Grosstext-Modus (14 -> 18, 16 -> 20). */
+#define LV_FONT_MONTSERRAT_12 0
+#define LV_FONT_MONTSERRAT_14 0
+#define LV_FONT_MONTSERRAT_16 0
+#define LV_FONT_MONTSERRAT_18 0
+#define LV_FONT_MONTSERRAT_20 0
+#define LV_FONT_MONTSERRAT_28 0
+#define LV_FONT_CUSTOM_DECLARE \
+    LV_FONT_DECLARE(lv_font_montserrat_12) LV_FONT_DECLARE(lv_font_montserrat_14) \
+    LV_FONT_DECLARE(lv_font_montserrat_16) LV_FONT_DECLARE(lv_font_montserrat_18) \
+    LV_FONT_DECLARE(lv_font_montserrat_20) LV_FONT_DECLARE(lv_font_montserrat_28)
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 /*==================

@@ -108,22 +108,22 @@ static volatile bool         g_cloudImageDirty = false;
 // The web page uses these to auto-pick the visitor's zone from their browser clock.
 static const struct { const char *label; const char *tz; int offMin; int dst; } TZOPTS[] = {
     {"UTC",                      "UTC0",                              0, 0},
-    {"London / Lisbon",          "GMT0BST,M3.5.0/1,M10.5.0",          0, 1},
-    {"Madrid / Paris / Berlin",  "CET-1CEST,M3.5.0,M10.5.0/3",       60, 1},
-    {"Athens / Helsinki",        "EET-2EEST,M3.5.0/3,M10.5.0/4",     120, 1},
-    {"Istanbul / Moscow",        "<+03>-3",                          180, 0},
-    {"New York (US Eastern)",    "EST5EDT,M3.2.0,M11.1.0",          -300, 1},
-    {"Chicago (US Central)",     "CST6CDT,M3.2.0,M11.1.0",          -360, 1},
-    {"Denver (US Mountain)",     "MST7MDT,M3.2.0,M11.1.0",          -420, 1},
+    {"London / Lissabon",       "GMT0BST,M3.5.0/1,M10.5.0",          0, 1},
+    {"Berlin / Wien / Zürich",   "CET-1CEST,M3.5.0,M10.5.0/3",       60, 1},
+    {"Athen / Helsinki",        "EET-2EEST,M3.5.0/3,M10.5.0/4",     120, 1},
+    {"Istanbul / Moskau",       "<+03>-3",                          180, 0},
+    {"New York (US-Ostküste)",    "EST5EDT,M3.2.0,M11.1.0",          -300, 1},
+    {"Chicago (US-Zentral)",     "CST6CDT,M3.2.0,M11.1.0",          -360, 1},
+    {"Denver (US-Mountain)",     "MST7MDT,M3.2.0,M11.1.0",          -420, 1},
     {"Phoenix (Arizona)",        "MST7",                            -420, 0},
-    {"Los Angeles (US Pacific)", "PST8PDT,M3.2.0,M11.1.0",          -480, 1},
+    {"Los Angeles (US-Westküste)", "PST8PDT,M3.2.0,M11.1.0",          -480, 1},
     {"Anchorage (Alaska)",       "AKST9AKDT,M3.2.0,M11.1.0",        -540, 1},
     {"Honolulu (Hawaii)",        "HST10",                           -600, 0},
-    {"Argentina / Brazil (E)",   "<-03>3",                          -180, 0},
-    {"India (IST)",              "<+0530>-5:30",                     330, 0},
+    {"Argentinien / Brasilien (O)",   "<-03>3",                          -180, 0},
+    {"Indien (IST)",              "<+0530>-5:30",                     330, 0},
     {"China / Singapore",        "<+08>-8",                          480, 0},
     {"Japan / Korea",            "JST-9",                            540, 0},
-    {"Sydney (AU Eastern)",      "AEST-10AEDT,M10.1.0,M4.1.0/3",     600, 1},
+    {"Sydney (AU-Ost)",      "AEST-10AEDT,M10.1.0,M4.1.0/3",     600, 1},
     {"Auckland (NZ)",            "NZST-12NZDT,M9.5.0,M4.1.0/3",      720, 1},
 };
 static const int TZOPTS_N = sizeof(TZOPTS) / sizeof(TZOPTS[0]);
@@ -547,22 +547,22 @@ static void handleRoot() {
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", sV, sV == curIdle ? " selected" : "", lbl);
         iopts += o;
     }
-    { char o[64]; snprintf(o, sizeof(o), "<option value=0%s>Never</option>", curIdle == 0 ? " selected" : ""); iopts += o; }
-    const char *unames[] = {"Aviation (ft, kt, nm, \xC2\xB0" "C)", "Metric (m, km/h, km, \xC2\xB0" "C)", "Imperial (ft, mph, mi, \xC2\xB0" "F)"};
+    { char o[64]; snprintf(o, sizeof(o), "<option value=0%s>Nie</option>", curIdle == 0 ? " selected" : ""); iopts += o; }
+    const char *unames[] = {"Luftfahrt (ft, kt, nm, \xC2\xB0" "C)", "Metrisch (m, km/h, km, \xC2\xB0" "C)", "Imperial (ft, mph, mi, \xC2\xB0" "F)"};
     String uopts;
     for (int i = 0; i < 3; ++i) {
         char o[96];
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == g_units ? " selected" : "", unames[i]);
         uopts += o;
     }
-    const char *tunames[] = {"Same as Units", "\xC2\xB0" "C", "\xC2\xB0" "F"};
+    const char *tunames[] = {"Wie Einheiten", "\xC2\xB0" "C", "\xC2\xB0" "F"};
     String tuopts;
     for (int i = 0; i < 3; ++i) {
         char o[64];
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", i, i == g_tempUnit ? " selected" : "", tunames[i]);
         tuopts += o;
     }
-    const char *tlnames[] = {"Off", "Short", "Medium", "Long"};
+    const char *tlnames[] = {"Aus", "Kurz", "Mittel", "Lang"};
     String tlopts;
     for (int i = 0; i < 4; ++i) {
         char o[64];
@@ -578,8 +578,8 @@ static void handleRoot() {
     }
     // minimum-altitude filter options (stored in ft; labels show ft + km for clarity)
     const struct { int ft; const char *lbl; } mavals[] = {
-        {0, "Off"}, {5000, "&gt; 5,000 ft (1.5 km)"}, {10000, "&gt; 10,000 ft (3 km)"},
-        {20000, "&gt; 20,000 ft (6 km)"}, {33000, "&gt; 33,000 ft (10 km)"},
+        {0, "Aus"}, {5000, "&gt; 5.000 ft (1,5 km)"}, {10000, "&gt; 10.000 ft (3 km)"},
+        {20000, "&gt; 20.000 ft (6 km)"}, {33000, "&gt; 33.000 ft (10 km)"},
     };
     String maopts;
     for (auto &mv : mavals) {
@@ -589,8 +589,8 @@ static void handleRoot() {
     }
     // maximum-altitude filter (heli / low-traffic spotting): same steps, "below" phrasing
     const struct { int ft; const char *lbl; } mbvals[] = {
-        {0, "Off"}, {5000, "&lt; 5,000 ft (1.5 km)"}, {10000, "&lt; 10,000 ft (3 km)"},
-        {20000, "&lt; 20,000 ft (6 km)"},
+        {0, "Aus"}, {5000, "&lt; 5.000 ft (1,5 km)"}, {10000, "&lt; 10.000 ft (3 km)"},
+        {20000, "&lt; 20.000 ft (6 km)"},
     };
     String mbopts;
     for (auto &mv : mbvals) {
@@ -598,7 +598,7 @@ static void handleRoot() {
         snprintf(o, sizeof(o), "<option value=%d%s>%s</option>", mv.ft, mv.ft == g_maxAltFt ? " selected" : "", mv.lbl);
         mbopts += o;
     }
-    const char *anames[] = {"Off", "Emergencies only", "New aircraft + emergencies"};
+    const char *anames[] = {"Aus", "Nur Notfälle", "Neue Flugzeuge + Notfälle"};
     String aopts;
     for (int i = 0; i < 3; ++i) {
         char o[80];
@@ -611,7 +611,7 @@ static void handleRoot() {
         const float pkm = (pv == 0) ? 0.0f : (pv / ufac);   // user unit -> km (value submitted)
         const bool  sel = (pv == 0) ? (g_proximityKm <= 0.0f) : (fabsf(g_proximityKm - pkm) < 0.4f);
         char lbl[24];
-        if (pv == 0) snprintf(lbl, sizeof(lbl), "Off");
+        if (pv == 0) snprintf(lbl, sizeof(lbl), "Aus");
         else         snprintf(lbl, sizeof(lbl), "%d %s", pv, uname);
         char o[80];
         snprintf(o, sizeof(o), "<option value=%.3f%s>%s</option>", pkm, sel ? " selected" : "", lbl);
@@ -628,17 +628,17 @@ static void handleRoot() {
     if (gps_present()) {
         gpsRow  = "<label><input type=checkbox class=ck ";
         gpsRow += g_useGps ? "checked" : "";
-        gpsRow += " onchange='gp(this.checked)'>Use GPS for location</label>";
+        gpsRow += " onchange='gp(this.checked)'>GPS für den Standort verwenden</label>";
         gpsRow += "<div style='font-size:12px;opacity:.6;margin:-2px 0 6px'>"
-                  "When on, the location above is used until the GPS gets a fix, then it takes over.</div>";
+                  "Wenn aktiv, gilt der Standort oben, bis das GPS einen Fix hat &ndash; danach übernimmt das GPS.</div>";
     }
     // 16 KB: the page outgrew 10 KB (~10.3 KB with the GPS row), and snprintf silently cut
     // off the closing </script>, so none of the live-setting handlers existed in the browser.
-    static const size_t BUFSZ = 16384;
+    static const size_t BUFSZ = 20480;   // DE: German labels are longer
     static char *buf = (char *)ps_malloc(BUFSZ);   // PSRAM: keep this big page buffer off the scarce
     if (!buf) return;                              //   internal heap (the contiguous RAM mbedTLS needs)
     const int len = snprintf(buf, BUFSZ,
-        "<!DOCTYPE html><html><head><meta charset=utf-8>"
+        "<!DOCTYPE html><html lang=de><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         "<title>Capsule Radar</title>"
         "<link rel=stylesheet href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'>"
@@ -667,47 +667,47 @@ static void handleRoot() {
         ".sec{background:#0c1a12!important;color:#1dff86!important;border:1px solid #2a4a39!important}"
         "#map{height:220px;border-radius:10px;margin:6px 0 8px;border:1px solid #2a4a39;z-index:0}"
         "</style></head><body>"
-        "<div class=hd><div class=dot></div><div><h1>Capsule Radar</h1><p class=sub>Live ADS-B radar &middot; configuration</p></div></div>"
-        "<div class=card><div class=t>Location &amp; range</div><form method=POST action=/save>"
-        "<label>Center point &mdash; tap the map or drag the pin</label>"
+        "<div class=hd><div class=dot></div><div><h1>Capsule Radar</h1><p class=sub>Live-ADS-B-Radar &middot; Einstellungen</p></div></div>"
+        "<div class=card><div class=t>Standort &amp; Reichweite</div><form method=POST action=/save>"
+        "<label>Mittelpunkt &mdash; auf die Karte tippen oder die Nadel ziehen</label>"
         "<div id=map></div>"
-        "<label>Center latitude</label><input id=lat name=lat value='%.5f'>"
-        "<label>Center longitude</label><input id=lon name=lon value='%.5f'>"
+        "<label>Breitengrad (Mitte)</label><input id=lat name=lat value='%.5f'>"
+        "<label>Längengrad (Mitte)</label><input id=lon name=lon value='%.5f'>"
         "%s"
-        "<label>Display range</label><select name=range>%s</select>"
-        "<label>Theme</label><select name=theme>%s</select>"
-        "<label>Time zone</label><select name=tz>%s</select>"
-        "<button>Save &amp; restart</button></form></div>"
-        "<div class=card><div class=t>Display</div>"
-        "<label>Brightness</label>"
+        "<label>Anzeigebereich</label><select name=range>%s</select>"
+        "<label>Design</label><select name=theme>%s</select>"
+        "<label>Zeitzone</label><select name=tz>%s</select>"
+        "<button>Speichern &amp; neu starten</button></form></div>"
+        "<div class=card><div class=t>Anzeige</div>"
+        "<label>Helligkeit</label>"
         "<input type=range min=5 max=255 value='%d' oninput='b(this.value,0)' onchange='b(this.value,1)'>"
-        "<label>Clock or dim after</label><select onchange='d(this.value)'>%s</select>"
-        "<label><input type=checkbox class=ck %s onchange='cl(this.checked)'>Show a clock instead of dimming</label>"
-        "<label><input type=checkbox class=ck %s onchange='fd(this.checked)'>Screen off when placed face-down</label>"
-        "<label><input type=checkbox class=ck %s onchange='sw(this.checked)'>Show radar sweep</label>"
-        "<label><input type=checkbox class=ck %s onchange='ap(this.checked)'>Show airports</label>"
-        "<label><input type=checkbox class=ck %s onchange='hg(this.checked)'>Hide aircraft on the ground</label>"
-        "<label>Minimum altitude</label><select onchange='ma(this.value)'>%s</select>"
-        "<label>Maximum altitude</label><select onchange='mb(this.value)'>%s</select>"
-        "<label><input type=checkbox class=ck %s onchange='mo(this.checked)'>Military aircraft only</label>"
-        "<label>Aircraft trails</label><select onchange='tl(this.value)'>%s</select>"
-        "<label>Max aircraft on screen</label><select onchange='mx(this.value)'>%s</select>"
-        "<label><input type=checkbox class=ck %s onchange='bt(this.checked)'>Large text (restarts the device)</label>"
-        "<label>Screen rotation (degrees clockwise)</label>"
+        "<label>Uhr oder Abdunkeln nach</label><select onchange='d(this.value)'>%s</select>"
+        "<label><input type=checkbox class=ck %s onchange='cl(this.checked)'>Uhr statt Abdunkeln anzeigen</label>"
+        "<label><input type=checkbox class=ck %s onchange='fd(this.checked)'>Bildschirm aus, wenn mit dem Display nach unten abgelegt</label>"
+        "<label><input type=checkbox class=ck %s onchange='sw(this.checked)'>Radar-Sweep anzeigen</label>"
+        "<label><input type=checkbox class=ck %s onchange='ap(this.checked)'>Flughäfen anzeigen</label>"
+        "<label><input type=checkbox class=ck %s onchange='hg(this.checked)'>Flugzeuge am Boden ausblenden</label>"
+        "<label>Mindesthöhe</label><select onchange='ma(this.value)'>%s</select>"
+        "<label>Maximalhöhe</label><select onchange='mb(this.value)'>%s</select>"
+        "<label><input type=checkbox class=ck %s onchange='mo(this.checked)'>Nur Militärflugzeuge</label>"
+        "<label>Flugspuren</label><select onchange='tl(this.value)'>%s</select>"
+        "<label>Max. Flugzeuge auf dem Bildschirm</label><select onchange='mx(this.value)'>%s</select>"
+        "<label><input type=checkbox class=ck %s onchange='bt(this.checked)'>Große Schrift (startet das Gerät neu)</label>"
+        "<label>Bildschirmdrehung (Grad im Uhrzeigersinn)</label>"
         "<input type=number min=0 max=359 step=1 value='%d' onchange='ro(this.value)'>"
-        "<label>Units</label><select onchange='u(this.value)'>%s</select>"
-        "<label>Weather temperature</label><select onchange='tu(this.value)'>%s</select></div>"
-        "<div class=card><div class=t>Sound</div>"
-        "<div" VOL_HIDE "><label>Volume</label>"
+        "<label>Einheiten</label><select onchange='u(this.value)'>%s</select>"
+        "<label>Temperatur (Wetter)</label><select onchange='tu(this.value)'>%s</select></div>"
+        "<div class=card><div class=t>Ton</div>"
+        "<div" VOL_HIDE "><label>Lautstärke</label>"
         "<input type=range min=0 max=100 value='%d' oninput='v(this.value,0)' onchange='v(this.value,1)'></div>"
-        "<label><input type=checkbox class=ck %s onchange='m(this.checked)'>Mute alerts</label>"
-        "<label>Alert on</label><select onchange='al(this.value)'>%s</select>"
-        "<label>Proximity alert</label><select onchange='px(this.value)'>%s</select>"
-        "<button type=button class=sec onclick='t()'>Test ping</button></div>"
-        "<div class=card><div class=t>Network</div>"
-        "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
-        "<form method=POST action=/wifi><button class=w>Reset WiFi</button></form></div>"
-        "<p class=ft>Reach me at <code>capsuleradar.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware update</a> &middot; v" FW_VERSION "</p>"
+        "<label><input type=checkbox class=ck %s onchange='m(this.checked)'>Hinweistöne stumm</label>"
+        "<label>Hinweiston bei</label><select onchange='al(this.value)'>%s</select>"
+        "<label>Annäherungsalarm</label><select onchange='px(this.value)'>%s</select>"
+        "<button type=button class=sec onclick='t()'>Ton testen</button></div>"
+        "<div class=card><div class=t>Netzwerk</div>"
+        "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Gespeichertes WLAN vergessen und das Einrichtungsportal wieder öffnen.</p>"
+        "<form method=POST action=/wifi><button class=w>WLAN zurücksetzen</button></form></div>"
+        "<p class=ft>Erreichbar unter <code>capsuleradar.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware-Update</a> &middot; v" FW_VERSION "</p>"
         "<script>"
         "var C=[%.5f,%.5f];var MAP=L.map('map').setView(C,10);"
         "L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'(c) OpenStreetMap'}).addTo(MAP);"
@@ -762,11 +762,11 @@ static void handleRoot() {
 // Nothing saved and no restart when an input is invalid: the browser shows this short
 // error page instead of the device rebooting centred on (0,0).
 static void sendSaveError(const char *field) {
-    String body = "<body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
-                  "Not saved: <b>";
+    String body = "<meta charset=utf-8><body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
+                  "Nicht gespeichert: <b>";
     body += field;
-    body += "</b> must be a number like 38.8409 (dot or comma). "
-            "<a href='/' style='color:#1dff86'>Back to settings</a></body>";
+    body += "</b> muss eine Zahl sein, z.&nbsp;B. 38.8409 (Punkt oder Komma). "
+            "<a href='/' style='color:#1dff86'>Zurück zu den Einstellungen</a></body>";
     g_web.send(400, "text/html", body);
 }
 
@@ -776,15 +776,15 @@ static void handleSave() {
     // to accept "" (0) and "38,84" (38) — both inside the valid range, both saved.
     double lat = 0.0, lon = 0.0, range = 0.0;
     if (g_web.hasArg("lat")) {
-        if (!parseDoubleStrict(g_web.arg("lat").c_str(), &lat)) return sendSaveError("latitude");
-        if (lat < -90.0 || lat > 90.0)          return sendSaveError("latitude (must be -90..90)");
+        if (!parseDoubleStrict(g_web.arg("lat").c_str(), &lat)) return sendSaveError("Breitengrad");
+        if (lat < -90.0 || lat > 90.0)          return sendSaveError("Breitengrad (-90..90)");
     }
     if (g_web.hasArg("lon")) {
-        if (!parseDoubleStrict(g_web.arg("lon").c_str(), &lon)) return sendSaveError("longitude");
-        if (lon < -180.0 || lon > 180.0)        return sendSaveError("longitude (must be -180..180)");
+        if (!parseDoubleStrict(g_web.arg("lon").c_str(), &lon)) return sendSaveError("Längengrad");
+        if (lon < -180.0 || lon > 180.0)        return sendSaveError("Längengrad (-180..180)");
     }
     if (g_web.hasArg("range")) {
-        if (!parseDoubleStrict(g_web.arg("range").c_str(), &range)) return sendSaveError("display range");
+        if (!parseDoubleStrict(g_web.arg("range").c_str(), &range)) return sendSaveError("Anzeigebereich");
     }
     const int tzIdx = g_web.hasArg("tz") ? g_web.arg("tz").toInt() : -1;
 
@@ -798,8 +798,8 @@ static void handleSave() {
     if (tzIdx >= 0 && tzIdx < TZOPTS_N) p.putString("tz", TZOPTS[tzIdx].tz);
     p.end();
     g_web.send(200, "text/html",
-        "<meta http-equiv=refresh content='4;url=/'><body style='background:#06100a;color:#1dff86;"
-        "font-family:sans-serif;padding:24px'>Saved. Restarting&hellip;</body>");
+        "<meta charset=utf-8><meta http-equiv=refresh content='4;url=/'><body style='background:#06100a;color:#1dff86;"
+        "font-family:sans-serif;padding:24px'>Gespeichert. Neustart&hellip;</body>");
     delay(400);
     ESP.restart();
 }
@@ -807,8 +807,8 @@ static void handleSave() {
 static void handleWifi() {
     if (refuseIfCrossSite()) return;
     g_web.send(200, "text/html",
-        "<body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
-        "WiFi reset. Connect to the <b>CapsuleRadar-Setup</b> network to reconfigure.</body>");
+        "<meta charset=utf-8><body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
+        "WLAN zurückgesetzt. Mit dem Netzwerk <b>CapsuleRadar-Setup</b> verbinden, um es neu einzurichten.</body>");
     delay(400);                     // let the response reach the browser
     // The driver stores the saved AP in its own NVS namespace ("nvs.net80211"). On Arduino
     // core 3.x both wm.resetSettings() and WiFi.disconnect(true,true) can silently no-op
@@ -1132,19 +1132,19 @@ static void handleUpdatePage() {
         "#bar{height:12px;background:#0c1a12;border-radius:6px;overflow:hidden;margin-top:14px;display:none}"
         "#fill{height:100%;width:0;background:#1dff86;transition:width .2s}#msg{margin-top:10px;color:#9affc8;font-size:13px}"
         "a{color:#1dff86}p{color:#9affc8;font-size:13px}"
-        "</style></head><body><h1>Firmware update (OTA)</h1><div class=card>"
-        "<p>Upload the <b>app firmware</b> <code>CapsuleRadar-ota.bin</code> from the GitHub release. "
-        "Do NOT use the merged flash image here.</p>"
+        "</style></head><body><h1>Firmware-Update (OTA)</h1><div class=card>"
+        "<p>Die <b>App-Firmware</b> <code>CapsuleRadar-ota*.bin</code> aus dem GitHub-Release hochladen. "
+        "NICHT das komplette Flash-Image (<code>CapsuleRadar-esp32s3*.bin</code>) verwenden.</p>"
         "<input type=file id=f accept='.bin'>"
-        "<button onclick=u()>Update over WiFi</button>"
+        "<button onclick=u()>Über WLAN aktualisieren</button>"
         "<div id=bar><div id=fill></div></div><div id=msg></div></div>"
-        "<p style='text-align:center;margin-top:14px'><a href=/>&larr; Back to settings</a></p>"
+        "<p style='text-align:center;margin-top:14px'><a href=/>&larr; Zurück zu den Einstellungen</a></p>"
         "<script>function u(){var f=document.getElementById('f').files[0];if(!f){return}"
         "var x=new XMLHttpRequest(),fd=new FormData();fd.append('f',f);"
         "document.getElementById('bar').style.display='block';"
         "x.upload.onprogress=function(e){if(e.lengthComputable)document.getElementById('fill').style.width=(e.loaded/e.total*100)+'%'};"
-        "x.onload=function(){var t=x.responseText;document.getElementById('msg').innerText=t=='OK'?t+' - rebooting...':t;};"
-        "x.onerror=function(){document.getElementById('msg').innerText='Upload failed'};"
+        "x.onload=function(){var t=x.responseText;document.getElementById('msg').innerText=t=='OK'?'OK - Neustart...':t;};"
+        "x.onerror=function(){document.getElementById('msg').innerText='Hochladen fehlgeschlagen'};"
         "x.open('POST','/update');x.send(fd);}</script></body></html>");
 }
 
@@ -1362,11 +1362,11 @@ void setup() {
     g_web.on("/poweroff", HTTP_POST, []() {
         if (refuseIfCrossSite()) return;
 #if !BOARD_HAS_PMIC
-        g_web.send(501, "text/plain", "power off not supported on this board");
+        g_web.send(501, "text/plain; charset=utf-8", "Ausschalten wird auf diesem Board nicht unterstützt");
 #else
         // Registered the Stats button on the same condition (setup): driving the
         // AXP2101 shutdown is the ONLY power-off path this firmware has.
-        if (!g_pmicOk) { g_web.send(501, "text/plain", "power off not supported: PMIC not detected"); return; }
+        if (!g_pmicOk) { g_web.send(501, "text/plain; charset=utf-8", "Ausschalten nicht möglich: PMIC nicht erkannt"); return; }
         g_web.send(200, "text/plain", "powering off");
         g_powerOffAtMs = millis() + 800;
 #endif
@@ -1493,7 +1493,7 @@ void loop() {
         if (haveTime) {
             snprintf(clk, sizeof(clk), "%02d:%02d", ti.tm_hour, ti.tm_min);
             char date[20];
-            strftime(date, sizeof(date), "%d %b %Y", &ti);   // e.g. "08 Jun 2026"
+            strftime(date, sizeof(date), "%d.%m.%Y", &ti);   // z. B. "08.06.2026"
             ui_set_date(date);
         }
         const bool wifiUp = (WiFi.status() == WL_CONNECTED);
@@ -1506,10 +1506,10 @@ void loop() {
         char net[112];
         if (WiFi.status() == WL_CONNECTED)
             // IP + the active centre point (helps users verify what actually got saved)
-            snprintf(net, sizeof(net), "Configure at\ncapsuleradar.local\n%s  |  %.5f, %.5f",
+            snprintf(net, sizeof(net), "Einstellungen unter\ncapsuleradar.local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
         else
-            snprintf(net, sizeof(net), "WiFi setup:\njoin CapsuleRadar-Setup");
+            snprintf(net, sizeof(net), "WLAN einrichten:\nmit CapsuleRadar-Setup verbinden");
         ui_set_netinfo(net);
         ui_set_feed_source(g_adsb.lastHost());   // Stats "Feed" line: who served the last data
         const bool bpresent = battery_present();

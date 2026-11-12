@@ -15,6 +15,14 @@
 </p>
 <p align="center"><sub>A real flight on the device: callsign, type, altitude/speed, <b>route</b> (Lisbon → Abu Dhabi) and the <b>aircraft photo</b> — all looked up automatically.</sub></p>
 
+> **🇩🇪 Deutsche Version.** Dieser Stand ist eine deutsche Übersetzung von
+> [socquique/capsule-radar](https://github.com/socquique/capsule-radar): Display-Texte,
+> Konfigurationsseite (`capsuleradar.local`), Firmware-Update-Seite, WLAN-Einrichtungsportal
+> und Web-Flasher sind auf Deutsch. Damit Umlaute (ä ö ü ß) auf dem Display erscheinen,
+> bringt die Firmware eigene Montserrat-Schriften mit Latin-1-Zeichen mit (`src/fonts/`,
+> erzeugt mit `scripts/gen_fonts_de.sh`). Fertige Firmware-Dateien gibt es unter *Releases*;
+> wie man sie aufspielt, steht in den Release-Notizen.
+
 A live **ADS-B aircraft radar** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75** — a round 466×466 AMOLED with capacitive touch. It pulls nearby aircraft from a free online feed over WiFi and plots them on a touch radar scope centered on your location, with live flight details and selectable visual skins.
 
 > Visual reference: open [`assets/plane_radar_2.0_mockup.html`](assets/plane_radar_2.0_mockup.html) in a browser.

@@ -7,7 +7,7 @@ name: Build firmware & deploy web flasher
 
 on:
   push:
-    branches: [main]
+    branches: [main, deutsch]
   workflow_dispatch:
 
 permissions:
@@ -54,7 +54,7 @@ jobs:
           mkdir -p site
           cp web/flash/index.html web/flash/manifest.json web/flash/manifest-amoled143.json site/
           # stamp the flasher page + manifests with the firmware version being built
-          VER=$(grep -oE 'FW_VERSION "[0-9.]+"' src/config.h | grep -oE '[0-9.]+' | head -1)
+          VER=$(grep -oE 'FW_VERSION "[^"]+"' src/config.h | head -1 | cut -d'"' -f2)   # e.g. 1.8.0-de
           sed -i "s/__FWVER__/${VER:-dev}/g" site/index.html site/manifest.json site/manifest-amoled143.json
           merge() {   # merge <pio-env> <output-bin>
             python -m esptool --chip esp32s3 merge_bin -o "$2" \
