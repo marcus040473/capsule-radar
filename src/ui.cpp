@@ -153,6 +153,13 @@ static void fold_ascii(char *s) {
 // Idle clock up (radar_view scene step >= 1): the HUD, zoom button and card make way for it.
 static bool s_clockUp = false;
 
+// ---- following one aircraft (main.cpp moves the radar centre; see ui_set_following)
+static void (*s_followCb)(const char *) = nullptr;
+static char  s_followHex[8] = "";
+static float s_followDistKm = 0.0f;
+static lv_obj_t *s_followBtn = nullptr, *s_followLbl = nullptr;   // eye on the card / HUD pill
+void ui_set_follow_cb(void (*cb)(const char *)) { s_followCb = cb; }
+
 static void refresh_card(void) {
     AcInfo in;
     const bool sel = radar::selected(in);
@@ -184,7 +191,14 @@ static void refresh_card(void) {
     else                        snprintf(hdgS, sizeof(hdgS), "%03.0f", in.track);
 
     char left[96], right[96];
-    snprintf(left,  sizeof(left),  "HÖHE  %s\nTEMPO %s\nENTF  %.1f %s", altS, spdS, dist_val(in.distKm), dist_unit());
+    // following this plane: the radar centre IS the plane, so show the distance from home
+    const bool followed = s_followHex[0] && strcmp(s_followHex, in.hex) == 0;
+    const float distKm = followed ? s_followDistKm : in.distKm;
+    snprintf(left,  sizeof(left),  "HÖHE  %s\nTEMPO %s\nENTF  %.1f %s", altS, spdS, dist_val(distKm), dist_unit());
+    if (s_followBtn) {   // the eye is lit while this plane is followed
+        lv_obj_set_style_bg_opa(s_followBtn, followed ? 200 : 0, 0);
+        lv_obj_set_style_text_color(lv_obj_get_child(s_followBtn, 0), followed ? lv_color_hex(0x04140B) : UI_SOFT, 0);
+    }
     snprintf(right, sizeof(right), "STEIG %s\nKURS  %s\nSQK   %s", vsS, hdgS, sqS);
     lv_label_set_text(s_cardL, left);
     lv_label_set_text(s_cardR, right);
@@ -471,6 +485,26 @@ void ui_set_battery(int pct, bool charging, bool present) {
 }
 
 static lv_obj_t *s_mapAttr = nullptr;   // "Karte (c) OSM, CARTO" under the date while a map is drawn
+
+void ui_set_following(const char *hex, const char *call, float distFromHomeKm) {
+    const bool was = s_followHex[0] != 0;
+    snprintf(s_followHex, sizeof(s_followHex), "%s", hex ? hex : "");
+    s_followDistKm = distFromHomeKm;
+    if (s_followLbl) {
+        if (s_followHex[0]) {
+            char b[48];
+            char who[16];
+            snprintf(who, sizeof(who), "%s", (call && *call) ? call : s_followHex);
+            fold_ascii(who);   // callsign only: folding the whole line would drop the eye symbol
+            snprintf(b, sizeof(b), LV_SYMBOL_EYE_OPEN "  Verfolge %s", who);
+            if (strcmp(lv_label_get_text(s_followLbl), b) != 0) lv_label_set_text(s_followLbl, b);
+            lv_obj_clear_flag(s_followLbl, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_followLbl, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (was != (s_followHex[0] != 0)) refresh_card();   // the eye changes state
+}
 void ui_set_date(const char *date) {
     if (s_hudDate && date) lv_label_set_text(s_hudDate, date);
     // called every second: also keep the map attribution in step with the map
@@ -836,13 +870,14 @@ static void clock_stage_cb(int stage) {
     const bool up = stage != 0;
     if (up == s_clockUp) return;
     s_clockUp = up;
-    lv_obj_t *chrome[] = { s_hudWifi, s_hudGps, s_hudCount, s_hudClock, s_hudBatt, s_hudDate, s_zoomBtn, s_mapAttr };
+    lv_obj_t *chrome[] = { s_hudWifi, s_hudGps, s_hudCount, s_hudClock, s_hudBatt, s_hudDate, s_zoomBtn, s_mapAttr, s_followLbl };
     for (lv_obj_t *o : chrome) {
         if (!o) continue;
         if (up) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
         else    lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
     if (!up && s_mapAttr && !radar::mapShown()) lv_obj_add_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);   // no map: stays hidden
+    if (!up && s_followLbl && !s_followHex[0]) lv_obj_add_flag(s_followLbl, LV_OBJ_FLAG_HIDDEN);   // not following
     refresh_card();                         // hides the card while the clock is up, restores it after
     if (!s_clockCatcher) return;
     if (up) lv_obj_clear_flag(s_clockCatcher, LV_OBJ_FLAG_HIDDEN);
@@ -1004,6 +1039,31 @@ static void build_card(void) {
     lv_obj_set_style_text_font(xl, F14(), 0);
     lv_obj_set_style_text_color(xl, UI_SOFT, 0);
     lv_obj_center(xl);
+
+    // "Verfolgen": an eye left of the X; tap = follow this plane, tap again = stop
+    s_followBtn = lv_obj_create(s_card);
+    lv_obj_remove_style_all(s_followBtn);
+    lv_obj_set_size(s_followBtn, cs, cs);
+    lv_obj_align(s_followBtn, LV_ALIGN_TOP_RIGHT, 9 - cs - 6, -9);
+    lv_obj_set_style_radius(s_followBtn, 10, 0);
+    lv_obj_set_style_border_color(s_followBtn, UI_GREEN, 0);
+    lv_obj_set_style_border_opa(s_followBtn, 90, 0);
+    lv_obj_set_style_border_width(s_followBtn, 1, 0);
+    lv_obj_set_style_bg_color(s_followBtn, UI_GREEN, 0);
+    lv_obj_set_style_bg_opa(s_followBtn, 0, 0);
+    lv_obj_add_flag(s_followBtn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_followBtn, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_set_ext_click_area(s_followBtn, 6);
+    lv_obj_add_event_cb(s_followBtn, [](lv_event_t *) {
+        AcInfo in;
+        if (!s_followCb || !radar::selected(in)) return;
+        s_followCb(strcmp(s_followHex, in.hex) == 0 ? "" : in.hex);   // toggle
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *el = lv_label_create(s_followBtn);
+    lv_label_set_text(el, LV_SYMBOL_EYE_OPEN);
+    lv_obj_set_style_text_font(el, F14(), 0);
+    lv_obj_set_style_text_color(el, UI_SOFT, 0);
+    lv_obj_center(el);
 
     // aircraft photo + credit, floating above the card (hidden until one loads)
     s_photo = lv_canvas_create(s_tileRadar);
@@ -1747,6 +1807,20 @@ void ui_create(void) {
     lv_obj_align(s_mapAttr, LV_ALIGN_TOP_MID, 0, s_bigText ? 92 : 86);
     lv_obj_add_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
 
+    // "Verfolge XYZ" pill under the date while following a plane; a tap ends it
+    s_followLbl = lv_label_create(s_tileRadar);
+    lv_obj_set_style_text_font(s_followLbl, F14(), 0);
+    lv_obj_set_style_text_color(s_followLbl, lv_color_hex(0x04140B), 0);
+    lv_obj_set_style_bg_color(s_followLbl, UI_GREEN, 0);
+    lv_obj_set_style_bg_opa(s_followLbl, 220, 0);
+    lv_obj_set_style_radius(s_followLbl, 12, 0);
+    lv_obj_set_style_pad_hor(s_followLbl, 10, 0);
+    lv_obj_set_style_pad_ver(s_followLbl, 3, 0);
+    lv_obj_align(s_followLbl, LV_ALIGN_TOP_MID, 0, s_bigText ? 112 : 104);
+    lv_obj_add_flag(s_followLbl, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_ext_click_area(s_followLbl, 8);
+    lv_obj_add_event_cb(s_followLbl, [](lv_event_t *) { if (s_followCb) s_followCb(""); }, LV_EVENT_CLICKED, NULL);
+
     // The theme hold's hint (radar_pressing_cb), styled like the zoom button and centred like
     // the detail card. Opaque: while it shows, it sits over the middle of an open card.
     s_holdHint = lv_label_create(s_tileRadar);
@@ -1921,7 +1995,9 @@ void ui_create(void) {
 
     s_wxCanvas = lv_canvas_create(wp);
     lv_obj_set_size(s_wxCanvas, WX_RADAR_SIZE, WX_RADAR_SIZE);
-    lv_obj_align(s_wxCanvas, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_align(s_wxCanvas, LV_ALIGN_TOP_MID, 0, WX_RADAR_CY - WX_RADAR_SIZE / 2);
+    lv_img_set_zoom(s_wxCanvas, 256 * WX_ZOOM_PCT / 100);   // magnified around its centre
+    lv_img_set_antialias(s_wxCanvas, true);
     // Not clickable: taps pass through to the panel, which owns the whole view.
     lv_obj_clear_flag(s_wxCanvas, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
@@ -1933,12 +2009,12 @@ void ui_create(void) {
     lv_label_set_text(s_wxStatus, "LADE WETTERRADAR...");
     lv_obj_align(s_wxStatus, LV_ALIGN_TOP_MID, 0, 222);
 
-    const int ringSize[3] = { 360, 240, 120 };
+    const int ringSize[3] = { WX_PX(360), WX_PX(240), WX_PX(120) };   // same km as before, magnified
     for (int i = 0; i < 3; ++i) {
         s_wxRings[i] = lv_obj_create(wp);
         lv_obj_remove_style_all(s_wxRings[i]);
         lv_obj_set_size(s_wxRings[i], ringSize[i], ringSize[i]);
-        lv_obj_align(s_wxRings[i], LV_ALIGN_TOP_MID, 0, 52 + (360 - ringSize[i]) / 2);
+        lv_obj_align(s_wxRings[i], LV_ALIGN_TOP_MID, 0, WX_RADAR_CY - ringSize[i] / 2);   // same km as before
         lv_obj_set_style_radius(s_wxRings[i], LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_border_color(s_wxRings[i], UI_GREEN, 0);
         lv_obj_set_style_border_opa(s_wxRings[i], i == 0 ? 180 : 90, 0);
@@ -1949,7 +2025,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxNorth, F12(), 0);
     lv_obj_set_style_text_color(s_wxNorth, UI_GREEN, 0);
     lv_label_set_text(s_wxNorth, "N");
-    lv_obj_align(s_wxNorth, LV_ALIGN_TOP_MID, 0, 58);
+    lv_obj_align(s_wxNorth, LV_ALIGN_TOP_MID, 0, s_bigText ? 74 : 68);   // inside the top of the ring, under the airport line
     s_wxCenter = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxCenter, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(s_wxCenter, UI_INK, 0);
@@ -1959,7 +2035,7 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_wxRange, F12(), 0);
     lv_obj_set_style_text_color(s_wxRange, UI_GREEN, 0);
     lv_label_set_text(s_wxRange, "75 KM");
-    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, 128, 225);
+    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, WX_PX(128), 225);
 
     s_wxFooter = lv_label_create(wp);
     lv_obj_set_width(s_wxFooter, 360);

@@ -17,6 +17,7 @@ static const double EARTH_CIRC_M = 40075016.686;           // Äquatorumfang (We
 static const int    NPIX = SCREEN_W * SCREEN_H;
 
 static uint8_t  *s_back = nullptr;      // Kern 0 setzt hier zusammen
+static uint8_t  *s_cov = nullptr;       // Kern 0: welche Pixel von s_back zur laufenden Planung gehören
 static uint8_t  *s_front = nullptr;     // Kern 1: letzte übernommene Fassung
 static uint16_t *s_rgb = nullptr;       // Kern 1: eingefärbt, das zeigt das Radar
 static lv_img_dsc_t s_dsc;
@@ -27,6 +28,11 @@ static volatile uint32_t s_wantGen = 0;
 static View s_want = {0, 0, 0, 0, MAP_SRC_OSM};
 static int  s_planSrc = MAP_SRC_OSM;    // Kern 0: Quelle der laufenden Planung
 static volatile int s_backSrc = MAP_SRC_OSM, s_frontSrc = MAP_SRC_OSM;
+static volatile uint32_t s_backGen = 0; // Planung, zu der s_back gehört (Kern 1 verwirft veraltete)
+static View s_shown = {0, 0, 0, 0, MAP_SRC_OSM};   // Kern 1: Ansicht, zu der s_front passt
+static bool s_shownValid = false;
+static int  s_lastMode = -1, s_lastTheme = -1;
+static bool s_haveFront = false;   // Kern 1: s_front enthält ein Bild
 static uint32_t s_planGen = 0xFFFFFFFF; // Kern 0: für welche Ansicht geplant wurde
 
 // Plan (nur Kern 0)
@@ -44,9 +50,10 @@ static volatile bool s_ready = false;   // s_back enthält ein neues Zwischenbil
 bool map_bg_begin(void) {
     if (s_back) return true;
     s_back  = (uint8_t *)big_alloc(NPIX);
+    s_cov   = (uint8_t *)big_alloc(NPIX);
     s_front = (uint8_t *)big_alloc(NPIX);
     s_rgb   = (uint16_t *)big_alloc((size_t)NPIX * 2);
-    if (!s_back || !s_front || !s_rgb) return false;
+    if (!s_back || !s_cov || !s_front || !s_rgb) return false;
     memset(&s_dsc, 0, sizeof(s_dsc));
     s_dsc.header.w = SCREEN_W;
     s_dsc.header.h = SCREEN_H;
@@ -56,10 +63,13 @@ bool map_bg_begin(void) {
     return true;
 }
 
+static void front_shift_to(const View &v);   // below (core 1)
+
 void map_bg_set_view(double lat, double lon, float rangeKm, float rotDeg) {
     if (lat == s_want.lat && lon == s_want.lon && rangeKm == s_want.rangeKm && rotDeg == s_want.rotDeg) return;
     s_want.lat = lat; s_want.lon = lon; s_want.rangeKm = rangeKm; s_want.rotDeg = rotDeg;
     s_wantGen = s_wantGen + 1;
+    front_shift_to(s_want);   // the old picture moves along at once; new tiles fill in after
 }
 
 void map_bg_set_source(int src) {
@@ -140,7 +150,9 @@ int map_bg_replan(void) {
                 s_tileN++;                     // (compose unwraps x next to the centre again)
             }
     memset(s_back, v.src == MAP_SRC_OSM ? 240 : 0, NPIX);   // fresh picture: the source's ground colour
+    memset(s_cov, 0, NPIX);                                  // nothing of the new plan composed yet
     s_backSrc = v.src;
+    s_backGen = gen;
     return s_tileN;
 }
 
@@ -183,6 +195,7 @@ bool map_bg_compose_tile(int i, const uint8_t *lum) {
             const int p01 = lum[yb * MAP_TILE_PX + xa], p11 = lum[yb * MAP_TILE_PX + xb];
             const int top = p00 * (256 - ax) + p10 * ax, bot = p01 * (256 - ax) + p11 * ax;
             row[x] = (uint8_t)((top * (256 - ay) + bot * ay) >> 16);
+            s_cov[(size_t)y * SCREEN_W + x] = 1;
         }
     }
     s_ready = true;
@@ -190,8 +203,41 @@ bool map_bg_compose_tile(int i, const uint8_t *lum) {
 }
 
 // ------------------------------------------------------------------ Kern 1
-static int  s_lastMode = -1, s_lastTheme = -1;
-static bool s_haveFront = false;
+static void retint(void);
+static int s_curMode = 1;
+
+// The radar recentred (e.g. following a plane) at the same range, rotation and source:
+// move the picture by the same number of pixels and blank only the uncovered strip.
+static void front_shift_to(const View &v) {
+    if (!s_front || !s_haveFront || !s_shownValid) return;
+    const View &o = s_shown;
+    if (v.rangeKm != o.rangeKm || v.rotDeg != o.rotDeg || v.src != o.src || v.rotDeg != 0.0f) {
+        s_shownValid = false;                   // different scale: the next picture replaces it
+        return;
+    }
+    const double mpp = v.rangeKm * 1000.0 / RADAR_R_OUTER_PX;
+    const double eastM  = (v.lon - o.lon) * 111320.0 * cos(v.lat * M_PI / 180.0);
+    const double northM = (v.lat - o.lat) * 110540.0;
+    const int dx = (int)lround(-eastM / mpp), dy = (int)lround(northM / mpp);   // content moves opposite
+    if (dx == 0 && dy == 0) { s_shown = v; return; }
+    const uint8_t ground = (uint8_t)(o.src == MAP_SRC_OSM ? 240 : 0);
+    if (abs(dx) >= SCREEN_W || abs(dy) >= SCREEN_H) {
+        memset(s_front, ground, NPIX);
+    } else {
+        // rows in the order that never overwrites a source row still needed
+        const int y0 = dy > 0 ? SCREEN_H - 1 : 0, y1 = dy > 0 ? -1 : SCREEN_H, ys = dy > 0 ? -1 : 1;
+        for (int y = y0; y != y1; y += ys) {
+            uint8_t *dst = s_front + (size_t)y * SCREEN_W;
+            const int sy = y - dy;
+            if (sy < 0 || sy >= SCREEN_H) { memset(dst, ground, SCREEN_W); continue; }
+            const uint8_t *src = s_front + (size_t)sy * SCREEN_W;
+            if (dx >= 0) { memmove(dst + dx, src, SCREEN_W - dx); memset(dst, ground, dx); }
+            else         { memmove(dst, src - dx, SCREEN_W + dx); memset(dst + SCREEN_W + dx, ground, -dx); }
+        }
+    }
+    s_shown = v;
+    retint();
+}
 
 static uint32_t theme_tint(int theme) {           // 0 = keine Karte (Orb hat eigenen Hintergrund)
     switch (theme) {
@@ -206,17 +252,33 @@ void map_bg_ui_tick(int mode) {
     if (!s_back) return;
     bool fresh = false;
     if (s_ready) {
-        memcpy(s_front, s_back, NPIX);
-        s_frontSrc = s_backSrc;
-        s_ready = false;
-        s_haveFront = true;
-        fresh = true;
+        if (s_backGen == s_wantGen) {          // still the view on screen: take it
+            if (!s_haveFront || s_frontSrc != s_backSrc || !s_shownValid) {
+                memcpy(s_front, s_back, NPIX);  // first picture (or new source): all of it
+            } else {
+                // only what the new plan has composed so far; the rest keeps the old
+                // (already shifted) picture, so a recentre never flashes black
+                for (int i = 0; i < NPIX; ++i) if (s_cov[i]) s_front[i] = s_back[i];
+            }
+            s_frontSrc = s_backSrc;
+            s_shown = s_want;
+            s_shownValid = true;
+            s_haveFront = true;
+            fresh = true;
+        }
+        s_ready = false;                        // stale (view changed meanwhile): dropped
     }
     const int theme = radar::theme();
     if (!fresh && mode == s_lastMode && theme == s_lastTheme) return;
     s_lastMode = mode;
     s_lastTheme = theme;
-    const uint32_t tint = theme_tint(theme);
+    s_curMode = mode;
+    retint();
+}
+
+static void retint(void) {
+    const int mode = s_curMode;
+    const uint32_t tint = theme_tint(radar::theme());
     if (mode <= 0 || !tint || !s_haveFront) { radar::setMap(nullptr); return; }
     // CARTO dark_all: Hintergrund ~#0e0e0e, Straßen grau, Beschriftung hell -> den Grund
     // schwarz lassen, den Rest strecken.

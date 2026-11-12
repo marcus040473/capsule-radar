@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de9"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de10"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
@@ -14,6 +14,11 @@
 #define UI_RECIPIENT_NAME "Lisa"
 #define UI_BIRTHDAY_MONTH 2     // Geburtstag (25.02.): an diesem Tag ein Geburtstagsgruß statt des Spruchs
 #define UI_BIRTHDAY_DAY   25
+
+// Flugzeug verfolgen: die Radarmitte springt wieder auf das Flugzeug, sobald es weiter als
+// dieser Anteil der Reichweite von der Mitte weg ist; nach FOLLOW_LOST_MS ohne Daten endet es.
+#define FOLLOW_RECENTER_FRAC 0.35f
+#define FOLLOW_LOST_MS       60000UL
 // Name des Geräts auf Webseite, Update-Seite, WLAN-Portal und Statistik-Seite.
 #define UI_APP_NAME       "Lisas Flug- & Wetterradar"
 // Name auf dem Startbild (zwei Zeilen, damit er auf das runde Display passt).

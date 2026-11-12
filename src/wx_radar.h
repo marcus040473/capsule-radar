@@ -3,6 +3,11 @@
 #include <stdint.h>
 
 #define WX_RADAR_SIZE 360
+// DE: the weather image is shown magnified (rings and labels scale with it, km stay right):
+// 360 px x WX_ZOOM_PCT % = ~440 px, filling more of the round screen. No extra memory.
+#define WX_ZOOM_PCT   122
+#define WX_RADAR_CY   232   // screen y of the weather image centre (rings and labels sit around it)
+#define WX_PX(v)      ((v) * WX_ZOOM_PCT / 100)   // a size/offset in the unzoomed layout -> on screen
 #define WX_RADAR_SOURCE_SIZE 512
 
 void wx_radar_begin(void);

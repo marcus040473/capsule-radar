@@ -27,7 +27,7 @@ static const uint32_t SETTLE_MS = 1200; // nach einer Änderung kurz warten (Zoo
 static char     s_key[80] = "";
 
 // Kachel-Zwischenspeicher (PSRAM): die letzten CACHE_N Kacheln als Helligkeit
-static const int CACHE_N = 24;          // 24 x 64 KB = 1,5 MB PSRAM
+static const int CACHE_N = 16;          // 16 x 64 KB = 1 MB PSRAM (the larger weather images need some too)
 struct CacheEntry { int src, z, x, y; uint32_t used; uint8_t *lum; };
 static CacheEntry s_cache[CACHE_N];
 static uint32_t   s_useCtr = 0;

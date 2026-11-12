@@ -58,4 +58,9 @@ void ui_set_user_photo(const uint16_t *px);
 void ui_set_gps_present(bool present);
 // Nachricht über allem (Spruch des Tages): bleibt, bis OK getippt wird; dann onOk().
 void ui_show_message(const char *title, const char *text, void (*onOk)(void));
-bool ui_message_up(void);       // GPS-Modul gefunden? (Einstellungen: Schalter + Signal-Anzeige)  // Foto-Seite: SCREEN_W x SCREEN_H RGB565 (PSRAM) oder nullptr
+bool ui_message_up(void);
+// Flugzeug verfolgen: das Auge auf der Detailkarte ruft cb(hex) (Start) bzw. cb("") (Ende).
+void ui_set_follow_cb(void (*cb)(const char *hex));
+// main.cpp meldet den Zustand: verfolgtes Flugzeug (hex, Rufzeichen; "" = keins) und seine
+// Entfernung vom eigenen Standort (die Karte zeigt sonst die Entfernung zur Radarmitte).
+void ui_set_following(const char *hex, const char *call, float distFromHomeKm);       // GPS-Modul gefunden? (Einstellungen: Schalter + Signal-Anzeige)  // Foto-Seite: SCREEN_W x SCREEN_H RGB565 (PSRAM) oder nullptr

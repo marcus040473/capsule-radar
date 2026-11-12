@@ -101,6 +101,10 @@ static volatile bool         g_rtcSyncPending = false;               // SNTP syn
 static std::vector<Aircraft> g_snap;                                 // last snapshot (instant re-render on zoom)
 static volatile bool         g_requery = false;                      // range changed -> adsb_task re-begins
 static float                 g_requeryKm = 0.0f;
+static double                g_queryLat = 0, g_queryLon = 0;         // feed query centre (home, or the followed plane)
+static String                g_followHex;                            // aircraft being followed ("" = none)
+static double                g_followLat = 0, g_followLon = 0;       // radar centre while following
+static uint32_t              g_followSeenMs = 0;                     // last time it was in the feed
 static volatile bool         g_feedOk = true;                        // ADS-B feed healthy? (HUD warning)
 static volatile uint32_t     g_lastFeedOkMs = 0;                     // millis() of the last good poll (HUD staleness)
 static volatile uint32_t     g_powerOffAtMs = 0;                     // !=0: AXP2101 power-off when millis() reaches it
@@ -197,7 +201,7 @@ static void adsb_task(void*) {
                 break;
         }
         if (g_requery) {                          // display range changed (double-tap zoom)
-            g_adsb.begin(g_settings.homeLat, g_settings.homeLon, g_requeryKm);
+            g_adsb.begin(g_queryLat, g_queryLon, g_requeryKm);   // home, or the plane being followed
             g_requery = false;
             lastPoll = 0;                         // poll immediately at the new radius
         }
@@ -394,6 +398,75 @@ static float queryRadiusKm() {
     return constrain(km, ADSB_QUERY_MIN_KM, ADSB_QUERY_MAX_KM);
 }
 
+// The radar's centre: home, or -- while following an aircraft -- that aircraft.
+static RadarSettings viewSettings() {
+    RadarSettings s = g_settings;
+    if (g_followHex.length()) { s.homeLat = g_followLat; s.homeLon = g_followLon; }
+    return s;
+}
+// Ask adsb_task to re-query around the current centre (set before raising g_requery).
+static void setQueryCenter() {
+    const RadarSettings v = viewSettings();
+    g_queryLat = v.homeLat;
+    g_queryLon = v.homeLon;
+}
+
+// ---- Flugzeug verfolgen (das Auge auf der Detailkarte) ----
+static const Aircraft *findAc(const String &hex) {
+    for (const Aircraft &a : g_snap) if (a.hex == hex) return &a;
+    return nullptr;
+}
+static void followReport() {
+    const Aircraft *a = g_followHex.length() ? findAc(g_followHex) : nullptr;
+    const float d = a ? (float)geo::haversineKm(g_settings.homeLat, g_settings.homeLon, a->lat, a->lon) : 0.0f;
+    ui_set_following(g_followHex.c_str(), a ? a->flight.c_str() : "", d);
+}
+static void followRecentre(double lat, double lon) {
+    g_followLat = lat;
+    g_followLon = lon;
+    g_requeryKm = queryRadiusKm();
+    setQueryCenter();
+    g_requery = true;                          // the feed follows too (else the plane leaves the query)
+}
+static void followCb(const char *hex) {        // from the UI: start (hex) or stop ("")
+    if (hex && *hex) {
+        const Aircraft *a = findAc(String(hex));
+        if (!a) return;
+        g_followHex = hex;
+        g_followSeenMs = millis();
+        followRecentre(a->lat, a->lon);
+        Serial.printf("[follow] %s (%s)\n", hex, a->flight.c_str());
+    } else {
+        if (!g_followHex.length()) return;
+        Serial.printf("[follow] stop %s\n", g_followHex.c_str());
+        g_followHex = "";
+        g_requeryKm = queryRadiusKm();
+        setQueryCenter();                      // back home
+        g_requery = true;
+    }
+    radar::update(g_snap, viewSettings());
+    followReport();
+    ui_on_data_updated();
+}
+// Each new snapshot: jump the centre to the plane once it has drifted far enough; give up
+// after FOLLOW_LOST_MS without it in the feed.
+static void followTick() {
+    if (!g_followHex.length()) return;
+    const Aircraft *a = findAc(g_followHex);
+    if (a) {
+        g_followSeenMs = millis();
+        if (geo::haversineKm(g_followLat, g_followLon, a->lat, a->lon) > g_settings.rangeKm * FOLLOW_RECENTER_FRAC)
+            followRecentre(a->lat, a->lon);
+    } else if (millis() - g_followSeenMs > FOLLOW_LOST_MS) {
+        Serial.printf("[follow] %s lost -> back home\n", g_followHex.c_str());
+        g_followHex = "";
+        g_requeryKm = queryRadiusKm();
+        setQueryCenter();
+        g_requery = true;
+    }
+    followReport();
+}
+
 // Double-tap zoom: change the display range, persist it, and ask adsb_task to
 // re-query at a matching radius (safely, on its own core). Re-render immediately.
 static void onRangeChange(float km) {
@@ -403,8 +476,9 @@ static void onRangeChange(float km) {
     p.putFloat("rangeKm", km);
     p.end();
     g_requeryKm = queryRadiusKm();
+    setQueryCenter();
     g_requery = true;
-    radar::update(g_snap, g_settings);   // instant visual zoom from the last snapshot
+    radar::update(g_snap, viewSettings());   // instant visual zoom from the last snapshot
     ui_set_range_km(km);
     ui_on_data_updated();
 }
@@ -936,6 +1010,7 @@ static void handleAlerts() {   // what triggers the alert sound (live)
     if (g_web.hasArg("prox")) {
         g_proximityKm = g_web.arg("prox").toFloat();   // km (0 = off)
         g_requeryKm = queryRadiusKm();                 // the query must cover the new alert circle
+        setQueryCenter();
         g_requery = true;
     }
     if (g_web.hasArg("save")) {
@@ -1537,6 +1612,7 @@ void setup() {
     ui_set_settings_sound(0);                    // no sound at all: no sound rows
 #endif
     ui_set_settings_wifi_cb(netsCountCb, netsNameCb, wifiAddCb);
+    ui_set_follow_cb(followCb);                  // the eye on the detail card
     ui_set_settings_cb(deviceSettingGet, deviceSettingSet);   // the settings page left of the radar
     ui_set_range_cb(onRangeChange);              // on-screen zoom button
     ui_set_units(g_units);                       // apply saved unit preset
@@ -1633,6 +1709,7 @@ void setup() {
     user_photo_begin();   // LittleFS + first decode of the own photo (on core 0, once adsb_task runs)
 
     float queryKm = queryRadiusKm();
+    g_queryLat = g_settings.homeLat; g_queryLon = g_settings.homeLon;
     g_adsb.begin(g_settings.homeLat, g_settings.homeLon, queryKm);
     wx_radar_begin();
     cloud_image_begin();
@@ -1777,7 +1854,8 @@ void loop() {
     }
 
     { const uint16_t *px; if (user_photo_take(&px)) ui_set_user_photo(px); }   // own photo decoded on core 0
-    map_bg_set_view(g_settings.homeLat, g_settings.homeLon, g_settings.rangeKm, (float)g_settings.rotationDeg);
+    { const RadarSettings v = viewSettings();   // the map follows the radar centre
+      map_bg_set_view(v.homeLat, v.homeLon, v.rangeKm, (float)v.rotationDeg); }
     map_bg_ui_tick(g_mapMode);           // take/tint new map pictures (built on core 0)
 
     // OTA: set up once WiFi is up, then service it every loop (flash over the air)
@@ -1797,7 +1875,8 @@ void loop() {
             g_snap.swap(g_aircraft);   // O(1) handoff under the lock; render on g_snap outside it.
             g_acDirty = false;         // g_aircraft now holds the previous snapshot (overwritten next poll)
             xSemaphoreGive(g_ac_mutex);
-            radar::update(g_snap, g_settings); // rebuild the glyph/trail layer
+            followTick();                          // following a plane: maybe move the centre to it
+            radar::update(g_snap, viewSettings()); // rebuild the glyph/trail layer
             ui_on_data_updated();              // refresh card/list/stats
             checkAudioEvents();                // ping new-in-range / emergency / military
         }
@@ -1912,6 +1991,7 @@ void loop() {
                 // re-query the new area — set the radius too (same formula as boot/zoom), or
                 // adsb_task would re-begin with a stale/zero g_requeryKm and fetch 0 aircraft.
                 g_requeryKm = queryRadiusKm();
+                setQueryCenter();
                 g_requery = true;                                       // adsb_task re-queries the new area
                 Serial.printf("[gps] re-centred to %.4f, %.4f\n", glat, glon);
             }
