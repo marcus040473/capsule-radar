@@ -855,8 +855,10 @@ static void clock_catcher_release_cb(lv_event_t *e) {
 }
 
 // Sweep compositor hooks (polled by display.cpp every loop pass).
+static lv_obj_t *s_msg = nullptr;   // message card on the top layer (ui_show_message)
 bool ui_sweep_visible(void) {
-    return s_tv && lv_tileview_get_tile_act(s_tv) == s_tileRadar && !lv_obj_is_scrolling(s_tv);
+    // not while a message covers the radar: the compositor would paint the sweep over it
+    return s_tv && !s_msg && lv_tileview_get_tile_act(s_tv) == s_tileRadar && !lv_obj_is_scrolling(s_tv);
 }
 
 int ui_sweep_masks(int16_t out[][5], int max) {
@@ -1396,6 +1398,7 @@ static void settings_open(void) {
     set_add_switch(UI_SET_AIRPORTS, "Flughäfen");
     set_add_switch(UI_SET_HIDEGROUND, "Am Boden ausblenden");
     set_add_switch(UI_SET_CLOCK, "Uhr im Ruhezustand");
+    set_add_switch(UI_SET_QUOTE, "Spruch des Tages");
     if (s_gpsPresent) set_add_switch(UI_SET_GPS, "GPS-Standort");
     {
         lv_obj_t *r = set_row("GPS-Signal", false);
@@ -1446,6 +1449,69 @@ static void build_settings(void) {
     make_tile_title(s_setPanel, UI_SETTINGS_TITLE);
 }
 
+// ------------------------------------------------------------------- message
+// Spruch des Tages: a round card over everything, until OK is tapped. Built on demand and
+// deleted on OK (a handful of objects, ~1-2 KB of LVGL heap while it shows).
+static void (*s_msgOk)(void) = nullptr;
+
+static void msg_ok_cb(lv_event_t *) {
+    if (s_msg) { lv_obj_del(s_msg); s_msg = nullptr; }
+    void (*cb)(void) = s_msgOk;
+    s_msgOk = nullptr;
+    if (cb) cb();
+}
+
+bool ui_message_up(void) { return s_msg != nullptr; }
+
+void ui_show_message(const char *title, const char *text, void (*onOk)(void)) {
+    if (s_msg) { lv_obj_del(s_msg); s_msg = nullptr; }
+    s_msgOk = onOk;
+    s_msg = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_msg);
+    lv_obj_set_size(s_msg, SCREEN_W, SCREEN_H);
+    lv_obj_center(s_msg);
+    lv_obj_set_style_radius(s_msg, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(s_msg, lv_color_hex(0x05100A), 0);
+    lv_obj_set_style_bg_opa(s_msg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(s_msg, UI_GREEN, 0);
+    lv_obj_set_style_border_opa(s_msg, 120, 0);
+    lv_obj_set_style_border_width(s_msg, 3, 0);
+    lv_obj_add_flag(s_msg, LV_OBJ_FLAG_CLICKABLE);          // swallow taps: nothing behind reacts
+    lv_obj_clear_flag(s_msg, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *t = lv_label_create(s_msg);
+    lv_obj_set_width(t, 320);
+    lv_obj_set_style_text_font(t, F16(), 0);
+    lv_obj_set_style_text_color(t, UI_GREEN, 0);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(t, title ? title : "");
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 70);
+
+    lv_obj_t *m = lv_label_create(s_msg);
+    lv_obj_set_width(m, 330);
+    lv_obj_set_style_text_font(m, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(m, UI_INK, 0);
+    lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_line_space(m, 6, 0);
+    lv_label_set_long_mode(m, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(m, text ? text : "");
+    lv_obj_align(m, LV_ALIGN_CENTER, 0, -6);
+
+    lv_obj_t *b = lv_btn_create(s_msg);
+    lv_obj_set_size(b, 150, 50);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -52);
+    lv_obj_set_style_radius(b, 25, 0);
+    lv_obj_set_style_bg_color(b, UI_GREEN, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_ext_click_area(b, 10);
+    lv_obj_add_event_cb(b, msg_ok_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *bl = lv_label_create(b);
+    lv_obj_set_style_text_font(bl, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(bl, lv_color_hex(0x04140B), 0);
+    lv_label_set_text(bl, "OK");
+    lv_obj_center(bl);
+}
+
 // --------------------------------------------------------------------- photo
 // Foto-Seite ganz links: das über die Webseite hochgeladene Bild, bildschirmfüllend. Die
 // Pixel liegen im PSRAM (user_photo.cpp); LVGL zeichnet direkt daraus, ohne eigenen Heap.
@@ -1481,7 +1547,7 @@ static void build_photo(void) {
     lv_obj_set_style_text_font(s_userHint, F16(), 0);
     lv_obj_set_style_text_color(s_userHint, UI_SOFT, 0);
     lv_obj_set_style_text_align(s_userHint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_text(s_userHint, "Noch kein Foto.\n\nHochladen auf der Webseite\ncapsuleradar.local");
+    lv_label_set_text(s_userHint, "Noch kein Foto.\n\nHochladen auf der Webseite\n" DEVICE_HOSTNAME ".local");
     lv_obj_center(s_userHint);
 }
 

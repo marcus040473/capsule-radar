@@ -1,10 +1,17 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de7"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de8"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
+// Netzwerkname: Webseite unter http://DEVICE_HOSTNAME.local/, Einrichtungs-WLAN SETUP_AP_NAME.
+// (Der NVS-Bereich für die Einstellungen heißt weiter "capsuleradar" -- nicht ändern, sonst
+// sind alle gespeicherten Einstellungen weg.)
+#define DEVICE_HOSTNAME   "lisasradar"
+#define SETUP_AP_NAME     "LisasRadar-Setup"
+// Für Grüße und den Spruch des Tages.
+#define UI_RECIPIENT_NAME "Lisa"
 // Name des Geräts auf Webseite, Update-Seite, WLAN-Portal und Statistik-Seite.
 #define UI_APP_NAME       "Lisas Flug- & Wetterradar"
 // Name auf dem Startbild (zwei Zeilen, damit er auf das runde Display passt).

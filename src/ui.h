@@ -45,6 +45,7 @@ enum UiSetting {
     UI_SET_WIFINET,     // Index des gespeicherten WLANs (siehe ui_set_settings_wifi_cb)
     UI_SET_GPS,         // 0/1   GPS-Standort (nur mit GPS-Modul, "-G"-Board)
     UI_SET_MAP,         // 0..2  Karte unter dem Radar: Aus / Dunkel / Hell
+    UI_SET_QUOTE,       // 0/1   Spruch des Tages
     UI_SET_COUNT
 };
 void ui_set_settings_cb(int (*get)(int id), void (*set)(int id, int value, bool save));
@@ -54,4 +55,7 @@ void ui_set_settings_wifi_cb(int (*count)(void), const char *(*name)(int i), voi
 void ui_set_settings_url(const char *url);   // Adresse der Webseite für den QR-Code ("" = kein WLAN)
 void ui_settings_refresh(void);              // Werte neu einlesen (z. B. nach einer Änderung über die Webseite)
 void ui_set_user_photo(const uint16_t *px);
-void ui_set_gps_present(bool present);       // GPS-Modul gefunden? (Einstellungen: Schalter + Signal-Anzeige)  // Foto-Seite: SCREEN_W x SCREEN_H RGB565 (PSRAM) oder nullptr
+void ui_set_gps_present(bool present);
+// Nachricht über allem (Spruch des Tages): bleibt, bis OK getippt wird; dann onOk().
+void ui_show_message(const char *title, const char *text, void (*onOk)(void));
+bool ui_message_up(void);       // GPS-Modul gefunden? (Einstellungen: Schalter + Signal-Anzeige)  // Foto-Seite: SCREEN_W x SCREEN_H RGB565 (PSRAM) oder nullptr

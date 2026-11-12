@@ -15,6 +15,7 @@
 #include "photo_client.h"
 #include "map_bg.h"                   // map under the radar (portable part)
 #include "map_client.h"               // its tile downloads (core 0)
+#include "quotes.h"                   // Spruch des Tages
 #include "user_photo.h"               // own photo for the photo page (LittleFS + PSRAM)
 #include <LittleFS.h>
 #include "weather.h"
@@ -39,7 +40,7 @@
 #include <time.h>                   // NTP/RTC clock + date
 #include <esp_sntp.h>               // SNTP sync callback: a REAL NTP fix (not just a plausible epoch)
 #include <WebServer.h>              // configuration web page
-#include <ESPmDNS.h>                // http://capsuleradar.local
+#include <ESPmDNS.h>                // http://DEVICE_HOSTNAME.local (config.h)
 #include <ArduinoOTA.h>             // OTA firmware update over WiFi (PlatformIO/espota)
 #include <Update.h>                 // browser OTA: self-flash an uploaded .bin
 #include <esp_heap_caps.h>          // largest-free-block metric (heap health)
@@ -82,6 +83,9 @@ static int                   g_minAltFt     = 0;                     // only sho
 static int                   g_maxAltFt     = 0;                     // only show aircraft below this altitude, ft (0 = off) (web/NVS)
 static int                   g_lastView     = 0;                     // last active view (0 radar/1 list/2 stats/3 weather) (NVS)
 static bool                  g_bootedIntoPortal = false;             // saved WiFi absent at boot (e.g. car hotspot not up yet)
+static bool                  g_quoteOn = true;                       // Spruch des Tages (NVS "quote")
+static long                  g_quoteDone = 0;                        // date (YYYYMMDD) whose quote was confirmed with OK
+static long                  g_quoteShowing = 0;                     // date of the quote on screen now
 static String                g_cartoKey;                             // optional CARTO basemap key (web page); empty = OpenStreetMap
 static int                   g_mapMode = 1;                          // map under the radar: 0 off, 1 dark, 2 bright (NVS "mapmode")
 static bool                  g_wifiOff = false;                      // WLAN switched off on the settings page (until the next boot)
@@ -160,7 +164,7 @@ static void adsb_task(void*) {
                           WiFi.localIP().toString().c_str(), WiFi.BSSIDstr().c_str(),
                           (int)WiFi.channel(), (int)WiFi.RSSI());
             configTzTime(g_tz.c_str(), "pool.ntp.org", "time.nist.gov");  // local time (web-configurable TZ)
-            Serial.println("[web] config: http://capsuleradar.local/  (or the IP above)");
+            Serial.println("[web] config: http://" DEVICE_HOSTNAME ".local/  (or the IP above)");
             nextWeatherAt = millis() + 5000UL; // let the first ADS-B poll complete before weather TLS
             nextCloudImageAt = millis() + 15000UL;
             nextWxRadarAt = millis() + 12000UL;
@@ -333,6 +337,8 @@ static void loadSettings() {
     g_units            = p.getInt("units", 1);   // DE: km, m, km/h unless chosen otherwise
     g_mapMode          = constrain(p.getInt("mapmode", 1), 0, 2);
     g_cartoKey         = p.getString("cartokey", "");
+    g_quoteOn          = p.getBool("quote", true);
+    g_quoteDone        = p.getLong("quoteday", 0);
     g_tempUnit         = p.getInt("tempu", 0);
     g_tz               = p.getString("tz", TZ_STR);
     g_bigText          = p.getBool("bigtext", false);
@@ -747,7 +753,7 @@ static void handleRoot() {
         "<button type=button onclick='up()'>Foto hochladen</button>"
         "<button type=button class=sec onclick='pd()'>Foto löschen</button>"
         "<div id=pm style='color:#9affc8;font-size:13px;margin-top:8px'></div></div>"
-        "<p class=ft>Erreichbar unter <code>capsuleradar.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware-Update</a> &middot; v" FW_VERSION "</p>"
+        "<p class=ft>Erreichbar unter <code>" DEVICE_HOSTNAME ".local</code> &middot; <a href=/update style='color:#9affc8'>Firmware-Update</a> &middot; v" FW_VERSION "</p>"
         "<script>"
         "var C=[%.5f,%.5f];var MAP=L.map('map').setView(C,10);"
         "L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'(c) OpenStreetMap'}).addTo(MAP);"
@@ -872,7 +878,7 @@ static void handleWifi() {
     if (refuseIfCrossSite()) return;
     g_web.send(200, "text/html",
         "<meta charset=utf-8><body style='background:#06100a;color:#ffb23c;font-family:sans-serif;padding:24px'>"
-        "WLAN zurückgesetzt. Mit dem Netzwerk <b>CapsuleRadar-Setup</b> verbinden, um es neu einzurichten.</body>");
+        "WLAN zurückgesetzt. Mit dem Netzwerk <b>" SETUP_AP_NAME "</b> verbinden, um es neu einzurichten.</body>");
     delay(400);                     // let the response reach the browser
     // The driver stores the saved AP in its own NVS namespace ("nvs.net80211"). On Arduino
     // core 3.x both wm.resetSettings() and WiFi.disconnect(true,true) can silently no-op
@@ -1279,6 +1285,7 @@ static int deviceSettingGet(int id) {
         case UI_SET_WIFINET:    return netsCurrent();
         case UI_SET_GPS:        return g_useGps ? 1 : 0;
         case UI_SET_MAP:        return g_mapMode;
+        case UI_SET_QUOTE:      return g_quoteOn ? 1 : 0;
         default:                return 0;
     }
 }
@@ -1354,6 +1361,10 @@ static void deviceSettingSet(int id, int v, bool save) {
                 Serial.println("[wifi] switched on again -> restarting");
                 g_rebootAtMs = millis() + 300;
             }
+            break;
+        case UI_SET_QUOTE:
+            g_quoteOn = v != 0;
+            nvsPutBool("quote", g_quoteOn);
             break;
         case UI_SET_MAP:
             g_mapMode = constrain(v, 0, 2);       // loop() re-tints / hides; core 0 loads tiles only when on
@@ -1600,14 +1611,14 @@ void setup() {
     if (addWifi) {
         // "WLAN hinzufügen" on the settings page: open the portal straight away and keep the
         // background reconnect away from the radio for a while so a phone can use the portal.
-        Serial.println("[wifi] setup portal opened to add a network - join 'CapsuleRadar-Setup'");
-        g_wm.startConfigPortal("CapsuleRadar-Setup");
+        Serial.println("[wifi] setup portal opened to add a network - join '" SETUP_AP_NAME "'");
+        g_wm.startConfigPortal(SETUP_AP_NAME);
         g_bootedIntoPortal = true;
         g_addingWifiUntil = millis() + 5UL * 60UL * 1000UL;
-    } else if (g_wm.autoConnect("CapsuleRadar-Setup")) {
+    } else if (g_wm.autoConnect(SETUP_AP_NAME)) {
         Serial.println("[wifi] connected");
     } else {
-        Serial.println("[wifi] config portal open - join 'CapsuleRadar-Setup' to set WiFi; UI stays live");
+        Serial.println("[wifi] config portal open - join '" SETUP_AP_NAME "' to set WiFi; UI stays live");
         g_bootedIntoPortal = true;   // saved WiFi may just not be up yet (car hotspot) -> loop() retries it
     }
 
@@ -1772,7 +1783,7 @@ void loop() {
     // OTA: set up once WiFi is up, then service it every loop (flash over the air)
     static bool otaUp = false;
     if (!otaUp && WiFi.status() == WL_CONNECTED) {
-        ArduinoOTA.setHostname("capsuleradar");        // -> capsuleradar.local (registers mDNS)
+        ArduinoOTA.setHostname(DEVICE_HOSTNAME);       // -> DEVICE_HOSTNAME.local (registers mDNS)
         ArduinoOTA.begin();
         MDNS.addService("http", "tcp", 80);            // advertise the config web page
         otaUp = true;
@@ -1827,6 +1838,21 @@ void loop() {
             char date[20];
             strftime(date, sizeof(date), "%d.%m.%Y", &ti);   // z. B. "08.06.2026"
             ui_set_date(date);
+            // Spruch des Tages: once a day, until OK. Not during the boot splash.
+            const long today = (long)(ti.tm_year + 1900) * 10000L + (ti.tm_mon + 1) * 100L + ti.tm_mday;
+            if (g_quoteOn && today != g_quoteDone && today != g_quoteShowing && ti.tm_year >= 125 &&
+                millis() > 5000UL) {
+                char title[64];
+                const char *q = quote_for_date(ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday, title, sizeof(title));
+                g_quoteShowing = today;
+                ui_show_message(title, q, []() {
+                    g_quoteDone = g_quoteShowing;
+                    Preferences p;
+                    p.begin("capsuleradar", false);
+                    p.putLong("quoteday", g_quoteDone);
+                    p.end();
+                });
+            }
         }
         const bool wifiUp = (WiFi.status() == WL_CONNECTED);
         const int  rssi   = wifiUp ? (int)WiFi.RSSI() : -127;
@@ -1838,12 +1864,12 @@ void loop() {
         char net[112];
         if (WiFi.status() == WL_CONNECTED)
             // IP + the active centre point (helps users verify what actually got saved)
-            snprintf(net, sizeof(net), "Einstellungen unter\ncapsuleradar.local\n%s  |  %.5f, %.5f",
+            snprintf(net, sizeof(net), "Einstellungen unter\n" DEVICE_HOSTNAME ".local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
         else if (g_wifiOff)
             snprintf(net, sizeof(net), "WLAN ist aus\n(Einstellungen links vom Radar)");
         else
-            snprintf(net, sizeof(net), "WLAN einrichten:\nmit CapsuleRadar-Setup verbinden");
+            snprintf(net, sizeof(net), "WLAN einrichten:\nmit " SETUP_AP_NAME " verbinden");
         ui_set_netinfo(net);
         if (wifiUp) {   // QR code on the settings page: the IP works on every phone (.local not always)
             char url[40];

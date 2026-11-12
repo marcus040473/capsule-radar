@@ -114,7 +114,7 @@ jobs:
           generate_release_notes: false
           body: |
             **Capsule Radar – deutsche Version.** Display, Konfigurationsseite und WLAN-Einrichtung auf Deutsch (mit Umlauten).
-            **Am Gerät:** auf dem Radar nach rechts wischen = Einstellungen (Ton, Design, Bild drehen, WLAN an/aus, WLAN wählen/hinzufügen, QR-Code zur Webseite, Ausschalten …). **Karte unter dem Radar** (Einstellungen → Karte: Aus / Dunkel / Hell). Noch einmal wischen = Foto-Seite – das Foto auf der Webseite `capsuleradar.local` hochladen.
+            **Am Gerät:** auf dem Radar nach rechts wischen = Einstellungen (Ton, Design, Bild drehen, WLAN an/aus, WLAN wählen/hinzufügen, QR-Code zur Webseite, Ausschalten …). **Karte unter dem Radar** (Einstellungen → Karte: Aus / Dunkel / Hell). Noch einmal wischen = Foto-Seite – das Foto auf der Webseite `lisasradar.local` hochladen.
 
             Es werden drei Boards unterstützt. Die Datei muss zu Ihrem Board passen:
 
@@ -129,7 +129,7 @@ jobs:
             - Oder: `esptool.py --chip esp32s3 write_flash 0x0 <datei>`
 
             **Update über WLAN (ohne Kabel, wenn schon Capsule Radar drauf ist):** die Datei `CapsuleRadar-ota*.bin`.
-            `http://capsuleradar.local/update` öffnen und die zum Board passende Datei hochladen. (Dort **nicht** das komplette Image hochladen.)
+            `http://lisasradar.local/update` öffnen und die zum Board passende Datei hochladen. (Dort **nicht** das komplette Image hochladen.)
 
             Mit dem falschen Image bleibt der Bildschirm schwarz – harmlos, einfach das richtige aufspielen.
 

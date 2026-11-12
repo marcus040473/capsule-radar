@@ -31,6 +31,11 @@
 > nie in der Firmware. Das Gerät merkt sich bis zu 5 WLANs und probiert beim Start reihum,
 > welches gerade da ist. Die Überschrift steht in `src/config.h` (`UI_SETTINGS_TITLE`).
 >
+> **Spruch des Tages:** einmal am Tag eine Karte mit einem liebevollen, motivierenden Spruch
+> (`src/quotes.cpp`), bis „OK“ getippt wird; im Advent, an Weihnachten, Silvester und Neujahr
+> besondere Grüße. Abschaltbar in den Einstellungen. Name/Adresse: `lisasradar.local`,
+> Einrichtungs-WLAN `LisasRadar-Setup` (`DEVICE_HOSTNAME`, `SETUP_AP_NAME` in `config.h`).
+>
 > **Karte:** unter dem Radar liegt eine OpenStreetMap-Karte (© OpenStreetMap-Mitwirkende),
 > auf dunkel umgerechnet und in der Designfarbe eingefärbt. Ohne weitere Einrichtung kommt sie
 > von tile.openstreetmap.org (kein Schlüssel nötig). Wer die dunkle CARTO-Karte möchte, trägt
