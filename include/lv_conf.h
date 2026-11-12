@@ -100,6 +100,11 @@
 #define LV_FONT_DEFAULT &lv_font_montserrat_14
 
 /*==================
+   EXTRA LIBS
+ *==================*/
+#define LV_USE_QRCODE 1   /* QR code to the web page on the settings page (built only while it is open) */
+
+/*==================
    WIDGETS
  *==================*/
 /* Core widgets default to enabled in v8. Spinner lives in "extra" — enable it

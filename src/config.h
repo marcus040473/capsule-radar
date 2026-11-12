@@ -1,7 +1,10 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de2"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de3"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+
+// Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
+#define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
 
 // ---------- Home location (default: Dénia, Spain) ----------
 // Overridable at runtime via the captive portal (stored in NVS).

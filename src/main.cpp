@@ -13,6 +13,8 @@
 #include "route_client.h"
 #include "photo.h"
 #include "photo_client.h"
+#include "user_photo.h"               // own photo for the photo page (LittleFS + PSRAM)
+#include <LittleFS.h>
 #include "weather.h"
 #include "weather_client.h"
 #include "wx_radar.h"
@@ -78,6 +80,8 @@ static int                   g_minAltFt     = 0;                     // only sho
 static int                   g_maxAltFt     = 0;                     // only show aircraft below this altitude, ft (0 = off) (web/NVS)
 static int                   g_lastView     = 0;                     // last active view (0 radar/1 list/2 stats/3 weather) (NVS)
 static bool                  g_bootedIntoPortal = false;             // saved WiFi absent at boot (e.g. car hotspot not up yet)
+static bool                  g_wifiOff = false;                      // WLAN switched off on the settings page (until the next boot)
+static uint32_t              g_addingWifiUntil = 0;                  // portal opened to ADD a network: no background reconnects till then
 static bool                  g_milOnly      = false;                 // only show military-flagged aircraft (web/NVS)
 static int                   g_rotation = 0;                         // clockwise display rotation, 0..359° (web/NVS)
 static bool                  g_useGps = false;                       // auto-set home from the LC76G GPS (-G variant) (web/NVS)
@@ -94,6 +98,8 @@ static volatile uint32_t     g_lastFeedOkMs = 0;                     // millis()
 static volatile uint32_t     g_powerOffAtMs = 0;                     // !=0: AXP2101 power-off when millis() reaches it
 static volatile uint32_t     g_rebootAtMs = 0;                       // !=0: reboot when millis() reaches it (clean start after WiFi config)
 static bool                  g_pmicOk = false;                       // AXP2101 answered (powers the power-off paths)
+static bool                  g_photoBlocked = false;                 // /photo: refused at START (cross-site)
+static bool                  g_photoSeen = false;                    // /photo: a file part actually arrived
 static bool                  g_updateBlocked = false;                // /update: refused at START (cross-site), 403 sent on completion
 static bool                  g_updateDone = false;                   // /update: Update.end() succeeded -> the completion handler may reboot
 static String                g_tz = TZ_STR;                          // POSIX timezone (web-configurable, NVS); applied via configTzTime
@@ -140,6 +146,7 @@ static void adsb_task(void*) {
     uint32_t nextCloudImageAt = UINT32_MAX;
     FeedWatchdog watchdog(millis());         // self-heal: see feed_watchdog.h
     for (;;) {
+        user_photo_service();                  // own photo: decode on this core (TJpgDec lives here)
         const bool conn = (WiFi.status() == WL_CONNECTED);
         if (conn && !wasConnected) {
             // disable WiFi modem power-save: on a mains-powered desk gadget it just adds latency
@@ -458,6 +465,8 @@ static WebServer g_web(80);
 //    this server never approves; <img>, links and forms cannot send it at all. The config
 //    page's own fetch() calls (G() in its script) send it; curl needs -H 'X-Radar: 1'.
 #define WEB_PAGE_HDR "X-Radar"
+#define WEB_STR_(x) #x
+#define WEB_STR(x) WEB_STR_(x)        // a number macro (SCREEN_W) as a string literal
 static bool requestCrossSite() {
     const String sfs = g_web.header("Sec-Fetch-Site");
     if (sfs.length() && sfs != "same-origin" && sfs != "none") return true;
@@ -634,7 +643,7 @@ static void handleRoot() {
     }
     // 16 KB: the page outgrew 10 KB (~10.3 KB with the GPS row), and snprintf silently cut
     // off the closing </script>, so none of the live-setting handlers existed in the browser.
-    static const size_t BUFSZ = 20480;   // DE: German labels are longer
+    static const size_t BUFSZ = 28672;   // DE: German labels + the photo card
     static char *buf = (char *)ps_malloc(BUFSZ);   // PSRAM: keep this big page buffer off the scarce
     if (!buf) return;                              //   internal heap (the contiguous RAM mbedTLS needs)
     const int len = snprintf(buf, BUFSZ,
@@ -707,6 +716,15 @@ static void handleRoot() {
         "<div class=card><div class=t>Netzwerk</div>"
         "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Gespeichertes WLAN vergessen und das Einrichtungsportal wieder öffnen.</p>"
         "<form method=POST action=/wifi><button class=w>WLAN zurücksetzen</button></form></div>"
+        "<div class=card><div class=t>Foto</div>"
+        "<p style='color:#9affc8;font-size:13px;margin:0 0 8px'>Erscheint am Gerät zwei Seiten links vom Radar. "
+        "Es wird nur auf dem Gerät gespeichert.</p>"
+        "<img id=pv src='/photo.jpg' alt='' style='display:block;width:100%%;max-width:220px;aspect-ratio:1;object-fit:cover;"
+        "border-radius:50%%;margin:0 auto 8px' onerror=\"this.style.display='none'\">"
+        "<input type=file id=pf accept='image/*'>"
+        "<button type=button onclick='up()'>Foto hochladen</button>"
+        "<button type=button class=sec onclick='pd()'>Foto löschen</button>"
+        "<div id=pm style='color:#9affc8;font-size:13px;margin-top:8px'></div></div>"
         "<p class=ft>Erreichbar unter <code>capsuleradar.local</code> &middot; <a href=/update style='color:#9affc8'>Firmware-Update</a> &middot; v" FW_VERSION "</p>"
         "<script>"
         "var C=[%.5f,%.5f];var MAP=L.map('map').setView(C,10);"
@@ -739,6 +757,20 @@ static void handleRoot() {
         "function px(v){G('/alerts?prox='+v+'&save=1')}"
         "function gp(c){G('/gps?v='+(c?1:0)+'&save=1')}"
         "function cl(c){G('/clock?v='+(c?1:0)+'&save=1')}"
+        // own photo: crop to the screen size in the browser (fills the round screen), upload as JPEG
+        "function up(){var f=document.getElementById('pf').files[0],m=document.getElementById('pm');"
+        "if(!f){m.textContent='Bitte zuerst ein Foto auswählen.';return}m.textContent='Wird vorbereitet...';"
+        "var i=new Image();i.onload=function(){var W=" WEB_STR(SCREEN_W) ",H=" WEB_STR(SCREEN_H) ","
+        "c=document.createElement('canvas');c.width=W;c.height=H;var x=c.getContext('2d'),"
+        "s=Math.max(W/i.width,H/i.height),w=i.width*s,h=i.height*s;x.fillStyle='#000';x.fillRect(0,0,W,H);"
+        "x.drawImage(i,(W-w)/2,(H-h)/2,w,h);c.toBlob(function(b){var d=new FormData();d.append('f',b,'photo.jpg');"
+        "m.textContent='Wird hochgeladen...';fetch('/photo',{method:'POST',body:d,headers:{'" WEB_PAGE_HDR "':'1'}})"
+        ".then(function(r){return r.text()}).then(function(t){m.textContent=t;var v=document.getElementById('pv');"
+        "v.style.display='block';v.src='/photo.jpg?'+Date.now()}).catch(function(){m.textContent='Hochladen fehlgeschlagen'})},"
+        "'image/jpeg',0.88)};i.onerror=function(){m.textContent='Dieses Bild kann der Browser nicht öffnen.'};"
+        "i.src=URL.createObjectURL(f)}"
+        "function pd(){fetch('/photodel',{method:'POST',headers:{'" WEB_PAGE_HDR "':'1'}}).then(function(r){return r.text()})"
+        ".then(function(t){document.getElementById('pv').style.display='none';document.getElementById('pm').textContent=t})}"
         // auto-pick the visitor's time zone from their browser clock (only if they haven't set one)
         "var TZSET=%d;(function(){if(TZSET)return;"
         "var d=new Date(),j=new Date(d.getFullYear(),0,1).getTimezoneOffset(),"
@@ -1117,24 +1149,102 @@ static void handleGps() {   // auto-set the centre point from the LC76G GPS (-G 
     g_web.send(200, "text/plain", "ok");
 }
 
+// ---- Gespeicherte WLANs ----
+// Der WLAN-Treiber merkt sich nur EIN Netz. Damit man am Gerät zwischen mehreren wählen kann
+// (Zuhause, Büro, Handy-Hotspot), stehen bis zu WIFI_NETS_MAX Netze mit Passwort zusätzlich
+// im NVS ("wifinets"). Beim Start wird das Netz des Treibers übernommen (auch eins aus einer
+// älteren Firmware); neue kommen über das Einrichtungsportal dazu ("WLAN hinzufügen").
+static const int WIFI_NETS_MAX = 5;
+static String g_netSsid[WIFI_NETS_MAX], g_netPass[WIFI_NETS_MAX];
+static int    g_netCount = 0;
+
+static void netsSave() {
+    Preferences p;
+    p.begin("wifinets", false);
+    p.putInt("n", g_netCount);
+    for (int i = 0; i < g_netCount; ++i) {
+        char k[4];
+        snprintf(k, sizeof(k), "s%d", i); p.putString(k, g_netSsid[i]);
+        snprintf(k, sizeof(k), "p%d", i); p.putString(k, g_netPass[i]);
+    }
+    p.end();
+}
+
+static void netsLoad() {
+    Preferences p;
+    p.begin("wifinets", true);
+    g_netCount = constrain(p.getInt("n", 0), 0, WIFI_NETS_MAX);
+    for (int i = 0; i < g_netCount; ++i) {
+        char k[4];
+        snprintf(k, sizeof(k), "s%d", i); g_netSsid[i] = p.getString(k, "");
+        snprintf(k, sizeof(k), "p%d", i); g_netPass[i] = p.getString(k, "");
+    }
+    p.end();
+}
+
+// Remember a network: a known one gets its password updated, a new one goes in front
+// (the oldest falls off when the list is full). Writes NVS only when something changed.
+static void netsAdd(const String &ssid, const String &pass) {
+    if (!ssid.length()) return;
+    for (int i = 0; i < g_netCount; ++i) {
+        if (g_netSsid[i] != ssid) continue;
+        if (g_netPass[i] != pass) { g_netPass[i] = pass; netsSave(); }
+        return;
+    }
+    const int n = min(g_netCount + 1, WIFI_NETS_MAX);
+    for (int i = n - 1; i > 0; --i) { g_netSsid[i] = g_netSsid[i - 1]; g_netPass[i] = g_netPass[i - 1]; }
+    g_netSsid[0] = ssid;
+    g_netPass[0] = pass;
+    g_netCount = n;
+    netsSave();
+}
+
+static int netsCurrent() {   // index of the network in use (or the driver's saved one)
+    const String cur = (WiFi.status() == WL_CONNECTED) ? WiFi.SSID() : g_wm.getWiFiSSID(true);
+    for (int i = 0; i < g_netCount; ++i) if (g_netSsid[i] == cur) return i;
+    return 0;
+}
+
+static int         netsCountCb() { return g_netCount; }
+static const char *netsNameCb(int i) { return (i >= 0 && i < g_netCount) ? g_netSsid[i].c_str() : ""; }
+
+// "WLAN hinzufügen": restart into the setup portal WITHOUT forgetting the saved networks.
+static void wifiAddCb() {
+    Preferences p;
+    p.begin("capsuleradar", false);
+    p.putBool("addwifi", true);
+    p.end();
+    Serial.println("[wifi] add network: restarting into the setup portal");
+    g_rebootAtMs = millis() + 300;
+}
+
 // ---- Einstellungen-Seite am Gerät (ui.cpp, links vom Radar) ----
 // Dieselbe Wirkung und dieselben NVS-Schlüssel wie die Web-Handler oben. Läuft wie diese in
 // loop()/Kern 1 (LVGL-Ereignis), darf also LVGL und radar:: direkt anfassen.
 static void nvsPutInt(const char *k, int v)   { Preferences p; p.begin("capsuleradar", false); p.putInt(k, v);  p.end(); }
 static void nvsPutBool(const char *k, bool v) { Preferences p; p.begin("capsuleradar", false); p.putBool(k, v); p.end(); }
 
+// Ton: one switch for level + mute. Aus = muted; Leise / Laut = fixed levels (the web page's
+// slider still sets anything in between, shown here as whichever step it is nearer).
+static const int SOUND_QUIET = 35, SOUND_LOUD = 85;
+
 static int deviceSettingGet(int id) {
     switch (id) {
         case UI_SET_BRIGHT:     return g_brightnessDay;
-        case UI_SET_VOLUME:     return g_volume;
-        case UI_SET_MUTE:       return g_muted ? 1 : 0;
+        case UI_SET_SOUND:
+            if (g_muted) return 0;
+            if (BOARD_HAS_BUZZER) return 1;                       // a buzzer is just on / off
+            return g_volume <= (SOUND_QUIET + SOUND_LOUD) / 2 ? 1 : 2;
+        case UI_SET_ALERTS:     return g_alertMode;
         case UI_SET_UNITS:      return g_units;
         case UI_SET_TRAIL:      return g_trailLen;
+        case UI_SET_ROTATE:     return ((g_rotation + 45) / 90) % 4;
         case UI_SET_SWEEP:      return g_showSweep ? 1 : 0;
         case UI_SET_AIRPORTS:   return g_showAirports ? 1 : 0;
         case UI_SET_HIDEGROUND: return g_hideGround ? 1 : 0;
         case UI_SET_CLOCK:      return g_clockOn ? 1 : 0;
-        case UI_SET_ALERTS:     return g_alertMode;
+        case UI_SET_WIFI:       return g_wifiOff ? 0 : 1;
+        case UI_SET_WIFINET:    return netsCurrent();
         default:                return 0;
     }
 }
@@ -1146,15 +1256,19 @@ static void deviceSettingSet(int id, int v, bool save) {
             applyBrightness();
             if (save) nvsPutInt("bright", g_brightnessDay);
             break;
-        case UI_SET_VOLUME:
-            g_volume = constrain(v, 0, 100);
+        case UI_SET_SOUND:
+            g_muted = (v == 0);
+            if (v == 1 && !BOARD_HAS_BUZZER) g_volume = SOUND_QUIET;
+            if (v == 2)                      g_volume = SOUND_LOUD;
             audio_set_volume(g_volume);
-            if (save) { nvsPutInt("vol", g_volume); if (!g_muted) audio_play(AUDIO_NEW); }   // hear the new level
-            break;
-        case UI_SET_MUTE:
-            g_muted = v != 0;
             audio_set_muted(g_muted);
+            nvsPutInt("vol", g_volume);
             nvsPutBool("mute", g_muted);
+            if (!g_muted) audio_play(AUDIO_NEW);   // hear the new level
+            break;
+        case UI_SET_ALERTS:
+            g_alertMode = constrain(v, 0, 2);
+            nvsPutInt("alertmode", g_alertMode);
             break;
         case UI_SET_UNITS:
             g_units = constrain(v, 0, 2);
@@ -1167,6 +1281,11 @@ static void deviceSettingSet(int id, int v, bool save) {
             g_trailLen = constrain(v, 0, 3);
             radar::setTrailLength(g_trailLen);
             nvsPutInt("traillen", g_trailLen);
+            break;
+        case UI_SET_ROTATE:
+            display::setRotation((uint16_t)(((v % 4) + 4) % 4 * 90));
+            g_rotation = display::rotation();
+            nvsPutInt("rotDeg", g_rotation);
             break;
         case UI_SET_SWEEP:
             g_showSweep = v != 0;
@@ -1187,9 +1306,26 @@ static void deviceSettingSet(int id, int v, bool save) {
             g_clockOn = v != 0;                   // loop() starts or ends it on its next pass
             nvsPutBool("clock", g_clockOn);
             break;
-        case UI_SET_ALERTS:
-            g_alertMode = constrain(v, 0, 2);
-            nvsPutInt("alertmode", g_alertMode);
+        case UI_SET_WIFI:
+            if (v == 0 && !g_wifiOff) {
+                // Off until switched on again or the next restart: never saved, so a power
+                // cycle always brings the network (and the web page) back.
+                g_wifiOff = true;
+                if (g_wm.getConfigPortalActive()) g_wm.stopConfigPortal();
+                WiFi.disconnect(true);            // true = radio off; the saved networks stay
+                WiFi.mode(WIFI_OFF);
+                Serial.println("[wifi] switched off on the settings page");
+            } else if (v != 0 && g_wifiOff) {
+                // Back on: a clean restart brings WiFi, mDNS, OTA and the web server up together.
+                Serial.println("[wifi] switched on again -> restarting");
+                g_rebootAtMs = millis() + 300;
+            }
+            break;
+        case UI_SET_WIFINET:
+            if (g_wifiOff || v < 0 || v >= g_netCount) break;
+            if (g_netSsid[v] == WiFi.SSID() && WiFi.status() == WL_CONNECTED) break;
+            Serial.printf("[wifi] switching to '%s'\n", g_netSsid[v].c_str());
+            WiFi.begin(g_netSsid[v].c_str(), g_netPass[v].c_str());   // also becomes the saved default
             break;
     }
 }
@@ -1326,7 +1462,7 @@ void setup() {
         // remembering it; NVS write only when the view actually changes.
         ui_show_view(g_lastView);
         ui_set_view_changed_cb([](int idx) {
-            if (idx == 4) return;   // the settings page is never the start view after a reboot
+            if (idx >= 4) return;   // settings and photo pages are never the start view after a reboot
             if (idx == g_lastView) return;
             g_lastView = idx;
             Preferences q;
@@ -1340,7 +1476,14 @@ void setup() {
         g_rotation = display::rotation();
     }
     radar::setThemeChangedCb(saveTheme);
-    ui_set_settings_volume(!BOARD_HAS_BUZZER);   // a buzzer has no level (like the web page's slider)
+#if BOARD_HAS_AUDIO
+    ui_set_settings_sound(2);                    // speaker: Aus / Leise / Laut
+#elif BOARD_HAS_BUZZER
+    ui_set_settings_sound(1);                    // buzzer: Aus / An
+#else
+    ui_set_settings_sound(0);                    // no sound at all: no sound rows
+#endif
+    ui_set_settings_wifi_cb(netsCountCb, netsNameCb, wifiAddCb);
     ui_set_settings_cb(deviceSettingGet, deviceSettingSet);   // the settings page left of the radar
     ui_set_range_cb(onRangeChange);              // on-screen zoom button
     ui_set_units(g_units);                       // apply saved unit preset
@@ -1401,7 +1544,24 @@ void setup() {
         g_rebootAtMs = millis() + 2500;   // let the portal deliver its 'saved' page first
     });
     wifi_prefer_strongest_ap();
-    if (g_wm.autoConnect("CapsuleRadar-Setup")) {
+    netsLoad();
+    if (g_wm.getWiFiIsSaved()) netsAdd(g_wm.getWiFiSSID(true), g_wm.getWiFiPass(true));   // incl. one saved by older firmware
+    bool addWifi = false;
+    {
+        Preferences p;
+        p.begin("capsuleradar", false);
+        addWifi = p.getBool("addwifi", false);
+        if (addWifi) p.remove("addwifi");
+        p.end();
+    }
+    if (addWifi) {
+        // "WLAN hinzufügen" on the settings page: open the portal straight away and keep the
+        // background reconnect away from the radio for a while so a phone can use the portal.
+        Serial.println("[wifi] setup portal opened to add a network - join 'CapsuleRadar-Setup'");
+        g_wm.startConfigPortal("CapsuleRadar-Setup");
+        g_bootedIntoPortal = true;
+        g_addingWifiUntil = millis() + 5UL * 60UL * 1000UL;
+    } else if (g_wm.autoConnect("CapsuleRadar-Setup")) {
         Serial.println("[wifi] connected");
     } else {
         Serial.println("[wifi] config portal open - join 'CapsuleRadar-Setup' to set WiFi; UI stays live");
@@ -1412,6 +1572,8 @@ void setup() {
     // ArduinoOTA is started from loop() once WiFi connects (see otaUp there).
 
     // --- ADS-B client + task ----------------------------------------------
+    user_photo_begin();   // LittleFS + first decode of the own photo (on core 0, once adsb_task runs)
+
     float queryKm = queryRadiusKm();
     g_adsb.begin(g_settings.homeLat, g_settings.homeLon, queryKm);
     wx_radar_begin();
@@ -1454,6 +1616,34 @@ void setup() {
     g_web.on("/gps", handleGps);
     g_web.on("/units", handleUnits);
     g_web.on("/tempu", handleTempUnit);
+    g_web.on("/photo.jpg", HTTP_GET, []() {
+        File f = LittleFS.open(user_photo_path(), "r");
+        if (!f) { g_web.send(404, "text/plain", "kein Foto"); return; }
+        g_web.sendHeader("Cache-Control", "no-store");
+        g_web.streamFile(f, "image/jpeg");
+        f.close();
+    });
+    g_web.on("/photo", HTTP_POST,
+        []() {
+            const bool refused = g_photoBlocked || requestCrossSite();
+            const bool seen = g_photoSeen;
+            g_photoBlocked = g_photoSeen = false;
+            if (refused) { g_web.send(403, "text/plain", "cross-site request rejected"); return; }
+            g_web.send(200, "text/plain; charset=utf-8",
+                       (seen && user_photo_upload_ok()) ? "Foto gespeichert. Auf dem Gerät zwei Seiten links vom Radar."
+                                              : "Foto konnte nicht gespeichert werden.");
+        },
+        []() {
+            HTTPUpload &up = g_web.upload();
+            if (up.status == UPLOAD_FILE_START) { g_photoBlocked = requestCrossSite(); g_photoSeen = true; }
+            if (g_photoBlocked) return;
+            user_photo_upload_chunk((int)up.status, up.buf, up.currentSize);
+        });
+    g_web.on("/photodel", HTTP_POST, []() {
+        if (refuseIfCrossSite()) return;
+        user_photo_delete();
+        g_web.send(200, "text/plain; charset=utf-8", "Foto gelöscht");
+    });
     g_web.on("/update", HTTP_GET, handleUpdatePage);
     g_web.on("/update", HTTP_POST,
         []() {
@@ -1505,17 +1695,30 @@ void loop() {
     // into the portal despite having saved credentials, keep retrying them in the background;
     // once the network shows up, reboot for a clean start (same rationale as the post-config
     // reboot: WiFiManager's portal server doesn't hand port 80 / mDNS over cleanly).
-    if (g_bootedIntoPortal && !g_rebootAtMs) {
+    if (g_bootedIntoPortal && !g_rebootAtMs && !g_wifiOff) {
         static uint32_t lastRetry = 0;
+        static int attempt = 0;
+        const bool adding = g_addingWifiUntil && (int32_t)(millis() - g_addingWifiUntil) < 0;
         if (WiFi.status() == WL_CONNECTED) {
             Serial.println("[wifi] saved network appeared -> restarting for a clean start");
             g_rebootAtMs = millis() + 800;
-        } else if (millis() - lastRetry > 20000UL && g_wm.getWiFiIsSaved()) {
+        } else if (!adding && millis() - lastRetry > 20000UL && (g_wm.getWiFiIsSaved() || g_netCount > 0)) {
             lastRetry = millis();
-            Serial.println("[wifi] retrying saved network in the background...");
-            WiFi.begin();                     // uses the stored credentials
+            // The usual network first, then the other remembered ones in turn (whichever is
+            // around: home, office, phone hotspot).
+            const int k = (g_netCount > 1) ? attempt % g_netCount : 0;
+            attempt++;
+            if (k == 0 || g_netCount <= 1) {
+                Serial.println("[wifi] retrying saved network in the background...");
+                WiFi.begin();                 // uses the stored credentials
+            } else {
+                Serial.printf("[wifi] trying remembered network '%s'...\n", g_netSsid[k].c_str());
+                WiFi.begin(g_netSsid[k].c_str(), g_netPass[k].c_str());
+            }
         }
     }
+
+    { const uint16_t *px; if (user_photo_take(&px)) ui_set_user_photo(px); }   // own photo decoded on core 0
 
     // OTA: set up once WiFi is up, then service it every loop (flash over the air)
     static bool otaUp = false;
@@ -1588,9 +1791,18 @@ void loop() {
             // IP + the active centre point (helps users verify what actually got saved)
             snprintf(net, sizeof(net), "Einstellungen unter\ncapsuleradar.local\n%s  |  %.5f, %.5f",
                      WiFi.localIP().toString().c_str(), g_settings.homeLat, g_settings.homeLon);
+        else if (g_wifiOff)
+            snprintf(net, sizeof(net), "WLAN ist aus\n(Einstellungen links vom Radar)");
         else
             snprintf(net, sizeof(net), "WLAN einrichten:\nmit CapsuleRadar-Setup verbinden");
         ui_set_netinfo(net);
+        if (wifiUp) {   // QR code on the settings page: the IP works on every phone (.local not always)
+            char url[40];
+            snprintf(url, sizeof(url), "http://%s/", WiFi.localIP().toString().c_str());
+            ui_set_settings_url(url);
+        } else {
+            ui_set_settings_url("");
+        }
         ui_set_feed_source(g_adsb.lastHost());   // Stats "Feed" line: who served the last data
         const bool bpresent = battery_present();
         ui_set_battery(battery_percent(), battery_charging(), bpresent);

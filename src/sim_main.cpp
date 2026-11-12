@@ -166,12 +166,28 @@ static void save_shot(const char *prefix, const char *name) {
 }
 
 // Settings page mock (the device keeps these in main.cpp + NVS).
-static int s_simSet[UI_SET_COUNT] = { 180, 60, 0, 0, 2, 1, 1, 0, 1, 2 };
+static int s_simSet[UI_SET_COUNT] = { 180, 2, 2, 0, 2, 0, 1, 1, 0, 1, 1, 0 };
+static const char *const s_simNets[] = { "FRITZ!Box 7590 XY", "Handy-Hotspot" };
+static int         sim_net_count(void) { return 2; }
+static const char *sim_net_name(int i) { return (i >= 0 && i < 2) ? s_simNets[i] : ""; }
+static void        sim_net_add(void) { printf("[sim] add WiFi network (device: restarts into the portal)\n"); }
+// a test pattern for the photo page (the device decodes the uploaded JPEG instead)
+static uint16_t s_simPhoto[SIM_W * SIM_H];
+static void sim_make_photo(void) {
+    for (int y = 0; y < SIM_H; ++y)
+        for (int x = 0; x < SIM_W; ++x) {
+            const int r = x * 31 / SIM_W, g = y * 63 / SIM_H, b = 31 - r;
+            const int dx = x - SIM_W / 2, dy = y - SIM_H / 2;
+            const bool ring = abs(dx * dx + dy * dy - 120 * 120) < 900;
+            s_simPhoto[y * SIM_W + x] = ring ? 0xFFFF : (uint16_t)((r << 11) | (g << 5) | b);
+        }
+}
 static int  sim_setting_get(int id) { return (id >= 0 && id < UI_SET_COUNT) ? s_simSet[id] : 0; }
 static void sim_setting_set(int id, int v, bool save) {
     if (id < 0 || id >= UI_SET_COUNT) return;
     s_simSet[id] = v;
     if (id == UI_SET_UNITS) { ui_set_units(v); ui_on_data_updated(); }
+    if (id == UI_SET_ROTATE) printf("[sim] rotation %d deg (device: display::setRotation)\n", v * 90);
     if (id == UI_SET_TRAIL) radar::setTrailLength(v);
     if (id == UI_SET_SWEEP) radar::setSweepEnabled(v != 0);
     if (id == UI_SET_AIRPORTS) radar::setAirportsEnabled(v != 0);
@@ -231,6 +247,10 @@ int main(int argc, char **argv) {
     ui_set_range_km(RANGE_KM_DEFAULT);
     ui_set_poweroff_cb([]() {});   // mock: represent a PMIC-fitted board (shows the Stats power-off button)
     ui_set_settings_cb(sim_setting_get, sim_setting_set);   // mock settings page values
+    ui_set_settings_wifi_cb(sim_net_count, sim_net_name, sim_net_add);
+    ui_set_settings_url("http://192.168.1.42/");
+    sim_make_photo();
+    ui_set_user_photo(s_simPhoto);
     mock_init();
     radar::update(g_mockAcs, g_set);
     ui_on_data_updated();
@@ -385,7 +405,7 @@ int main(int argc, char **argv) {
             int ow, oh;
             SDL_GetRendererOutputSize(s_ren, &ow, &oh);
             struct Shot { const char *name; int view; int theme; bool forecast; int units; };
-            const Shot shots[10] = {
+            const Shot shots[11] = {
                 { "radar",  0, THEME_PHOSPHOR, false, 0 },
                 { "orb", 0, THEME_ORB, false, 0 },
                 { "amber",  0, THEME_AMBER, false, 0 },
@@ -396,8 +416,9 @@ int main(int argc, char **argv) {
                 { "weather",3, THEME_PHOSPHOR, false, 0 },
                 { "forecast",3, THEME_PHOSPHOR, true, 0 },
                 { "settings",4, THEME_PHOSPHOR, false, 0 },
+                { "photo",  5, THEME_PHOSPHOR, false, 0 },
             };
-            for (int v = 0; v < 10; ++v) {
+            for (int v = 0; v < 11; ++v) {
                 ui_set_units(shots[v].units);
                 ui_set_range_km(g_set.rangeKm);   // like handleUnits() on the device: zoom label,
                 ui_on_data_updated();             // then the card/list in the new units

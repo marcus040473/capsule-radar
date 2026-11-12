@@ -25,7 +25,8 @@
 
 static lv_obj_t *s_tv = nullptr;
 static lv_obj_t *s_tileRadar = nullptr, *s_tileList = nullptr, *s_tileStats = nullptr, *s_tileWeather = nullptr;
-static lv_obj_t *s_tileSettings = nullptr;   // links vom Radar (Spalte 0); das Radar sitzt in Spalte 1
+static lv_obj_t *s_tileSettings = nullptr;   // links vom Radar (Spalte 1); das Radar sitzt in Spalte 2
+static lv_obj_t *s_tilePhoto = nullptr;      // Spalte 0, ganz links: die Foto-Seite (siehe "photo")
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
 static lv_obj_t *s_photo = nullptr, *s_photoCredit = nullptr;   // aircraft photo above the card
@@ -566,7 +567,7 @@ static void list_tap_cb(lv_event_t *e) {
     (void)e;
     if (!s_listPressHex[0] || !radar::selectHex(s_listPressHex)) return;   // left the feed mid-press
     refresh_card();
-    lv_obj_set_tile_id(s_tv, 1, 0, LV_ANIM_ON);   // jump back to the radar (column 1)
+    lv_obj_set_tile_id(s_tv, 2, 0, LV_ANIM_ON);   // jump back to the radar (column 2)
 }
 
 static void build_list(void) {
@@ -858,6 +859,7 @@ static int active_view_index(void) {
     if (act == s_tileStats)   return 2;
     if (act == s_tileWeather) return 3;
     if (act == s_tileSettings) return 4;
+    if (act == s_tilePhoto)    return 5;
     return 0;
 }
 
@@ -1003,37 +1005,75 @@ static void build_card(void) {
 // Logik und denselben NVS-Speicher benutzen.
 static int  (*s_setGet)(int) = nullptr;
 static void (*s_setSet)(int, int, bool) = nullptr;
-static bool s_setShowVolume = true;
+static int  (*s_netCount)(void) = nullptr;
+static const char *(*s_netName)(int) = nullptr;
+static void (*s_netAdd)(void) = nullptr;
+static int  s_setSound = 2;                           // 0 none, 1 on/off (buzzer), 2 levels
+static char s_setUrl[64] = "";
 static lv_obj_t *s_setList = nullptr;
 static lv_obj_t *s_setWidget[UI_SET_COUNT] = {};      // slider / switch / cycle-button label
-static lv_obj_t *s_setVolRow = nullptr;
 static lv_obj_t *s_setThemeLbl = nullptr;
+static lv_obj_t *s_setQr = nullptr, *s_setUrlLbl = nullptr;
+static lv_obj_t *s_confirmLbl = nullptr;              // a two-tap button armed by its first tap
+static lv_timer_t *s_confirmTimer = nullptr;
 
+static const char *const kSetSound[]  = { "Aus", "Leise", "Laut" };
+static const char *const kSetOnOff[]  = { "Aus", "An" };
 static const char *const kSetUnits[]  = { "Luftfahrt", "Metrisch", "Imperial" };
 static const char *const kSetTrail[]  = { "Aus", "Kurz", "Mittel", "Lang" };
 static const char *const kSetAlerts[] = { "Aus", "Nur Notfälle", "Neue + Notfälle" };
+static const char *const kSetRotate[] = { "0\xC2\xB0", "90\xC2\xB0", "180\xC2\xB0", "270\xC2\xB0" };
 static const char *const kSetThemes[] = { "Phosphor", "Orb", "Amber CRT", "Militär" };
 
-static const char *const *set_options(int id, int *n) {
+static int set_option_count(int id) {
     switch (id) {
-        case UI_SET_UNITS:  *n = 3; return kSetUnits;
-        case UI_SET_TRAIL:  *n = 4; return kSetTrail;
-        case UI_SET_ALERTS: *n = 3; return kSetAlerts;
-        default:            *n = 0; return nullptr;
+        case UI_SET_SOUND:   return s_setSound == 1 ? 2 : 3;
+        case UI_SET_ALERTS:  return 3;
+        case UI_SET_UNITS:   return 3;
+        case UI_SET_TRAIL:   return 4;
+        case UI_SET_ROTATE:  return 4;
+        case UI_SET_WIFINET: return s_netCount ? s_netCount() : 0;
+        default:             return 0;
+    }
+}
+
+static const char *set_option_text(int id, int v) {
+    const int n = set_option_count(id);
+    if (n <= 0) return id == UI_SET_WIFINET ? "keins" : "-";
+    v = (v % n + n) % n;
+    switch (id) {
+        case UI_SET_SOUND:   return s_setSound == 1 ? kSetOnOff[v] : kSetSound[v];
+        case UI_SET_ALERTS:  return kSetAlerts[v];
+        case UI_SET_UNITS:   return kSetUnits[v];
+        case UI_SET_TRAIL:   return kSetTrail[v];
+        case UI_SET_ROTATE:  return kSetRotate[v];
+        case UI_SET_WIFINET: { const char *s = s_netName ? s_netName(v) : nullptr; return (s && *s) ? s : "?"; }
+        default:             return "-";
     }
 }
 
 static int set_get(int id) { return s_setGet ? s_setGet(id) : 0; }
 
 static void set_cycle_label(int id, int v) {
-    int n = 0;
-    const char *const *opt = set_options(id, &n);
-    if (opt && s_setWidget[id]) lv_label_set_text(s_setWidget[id], opt[(v % n + n) % n]);
+    if (s_setWidget[id]) lv_label_set_text(s_setWidget[id], set_option_text(id, v));
 }
 
 static void set_theme_label(void) {
     const int th = radar::theme();
     if (s_setThemeLbl) lv_label_set_text(s_setThemeLbl, kSetThemes[(th >= 0 && th < 4) ? th : 0]);
+}
+
+// QR code + address of the web page (or a note when there is no WiFi)
+static void set_url_refresh(void) {
+    if (!s_setQr || !s_setUrlLbl) return;
+    if (s_setUrl[0]) {
+        lv_qrcode_update(s_setQr, s_setUrl, strlen(s_setUrl));
+        lv_obj_clear_flag(s_setQr, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_setUrlLbl, s_setUrl);
+    } else {
+        lv_obj_add_flag(s_setQr, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_setUrlLbl, "Kein WLAN verbunden");
+    }
 }
 
 void ui_set_settings_cb(int (*get)(int), void (*set)(int, int, bool)) {
@@ -1042,11 +1082,19 @@ void ui_set_settings_cb(int (*get)(int), void (*set)(int, int, bool)) {
     ui_settings_refresh();
 }
 
-void ui_set_settings_volume(bool show) {
-    s_setShowVolume = show;
-    if (!s_setVolRow) return;
-    if (show) lv_obj_clear_flag(s_setVolRow, LV_OBJ_FLAG_HIDDEN);
-    else      lv_obj_add_flag(s_setVolRow, LV_OBJ_FLAG_HIDDEN);
+void ui_set_settings_sound(int mode) { s_setSound = mode < 0 ? 0 : (mode > 2 ? 2 : mode); }
+
+void ui_set_settings_wifi_cb(int (*count)(void), const char *(*name)(int), void (*add)(void)) {
+    s_netCount = count;
+    s_netName = name;
+    s_netAdd = add;
+}
+
+void ui_set_settings_url(const char *url) {
+    if (!url) url = "";
+    if (strcmp(url, s_setUrl) == 0) return;           // called every second: only act on a change
+    snprintf(s_setUrl, sizeof(s_setUrl), "%s", url);
+    set_url_refresh();
 }
 
 void ui_settings_refresh(void) {
@@ -1081,10 +1129,9 @@ static void set_switch_cb(lv_event_t *e) {
 
 static void set_cycle_cb(lv_event_t *e) {
     const int id = (int)(intptr_t)lv_event_get_user_data(e);
-    int n = 0;
-    set_options(id, &n);
+    const int n = set_option_count(id);
     if (n <= 0) return;
-    const int v = (set_get(id) + 1) % n;
+    const int v = ((set_get(id) + 1) % n + n) % n;
     if (s_setSet) s_setSet(id, v, true);
     set_cycle_label(id, set_get(id));   // show what main actually applied
 }
@@ -1093,6 +1140,37 @@ static void set_theme_cb(lv_event_t *) {
     radar::setTheme((radar::theme() + 1) % 4);   // saved by main's theme-changed callback
     set_theme_label();
 }
+
+// Two-tap buttons (power off, add WiFi): the first tap arms the button and asks for a
+// second one; it disarms itself after 3 s.
+struct ConfirmAction { const char *text; void (*run)(void); };
+static void confirm_disarm(void) {
+    if (s_confirmTimer) { lv_timer_del(s_confirmTimer); s_confirmTimer = nullptr; }
+    if (s_confirmLbl) {
+        const ConfirmAction *a = (const ConfirmAction *)lv_obj_get_user_data(s_confirmLbl);
+        if (a) lv_label_set_text(s_confirmLbl, a->text);
+    }
+    s_confirmLbl = nullptr;
+}
+static void confirm_timer_cb(lv_timer_t *) { s_confirmTimer = nullptr; confirm_disarm(); }
+static void confirm_cb(lv_event_t *e) {
+    lv_obj_t *lbl = (lv_obj_t *)lv_event_get_user_data(e);
+    const ConfirmAction *a = (const ConfirmAction *)lv_obj_get_user_data(lbl);
+    if (s_confirmLbl == lbl) {                 // second tap: do it
+        confirm_disarm();
+        if (a && a->run) a->run();
+        return;
+    }
+    confirm_disarm();                          // another button was armed: drop that one
+    s_confirmLbl = lbl;
+    lv_label_set_text(lbl, "Wirklich?");
+    s_confirmTimer = lv_timer_create(confirm_timer_cb, 3000, nullptr);
+    lv_timer_set_repeat_count(s_confirmTimer, 1);
+}
+static void run_poweroff(void) { if (s_poweroffCb) s_poweroffCb(); }
+static void run_wifi_add(void) { if (s_netAdd) s_netAdd(); }
+static const ConfirmAction kActPowerOff = { "Ausschalten", run_poweroff };
+static const ConfirmAction kActWifiAdd  = { "Hinzufügen", run_wifi_add };
 
 // Speicher: LVGLs Heap ist knapp (64 KB, davon braucht der Rest der Oberfläche ~45 KB). Darum
 // teilen sich alle Zeilen und Bedienelemente eine Handvoll statischer Styles, und Lage/Größe
@@ -1116,11 +1194,13 @@ static void set_styles_init(void) {
     lv_style_set_flex_cross_place(&s_stRow, LV_FLEX_ALIGN_CENTER);
     lv_style_set_flex_track_place(&s_stRow, LV_FLEX_ALIGN_CENTER);
 
-    lv_style_init(&s_stRowTall);                       // slider rows: label above the bar
-    lv_style_set_height(&s_stRowTall, s_bigText ? 74 : 64);
+    lv_style_init(&s_stRowTall);                       // slider + QR rows: content stacked
+    lv_style_set_height(&s_stRowTall, LV_SIZE_CONTENT);
+    lv_style_set_pad_ver(&s_stRowTall, 10);
+    lv_style_set_pad_row(&s_stRowTall, 10);
     lv_style_set_pad_hor(&s_stRowTall, 14);
     lv_style_set_flex_flow(&s_stRowTall, LV_FLEX_FLOW_COLUMN);
-    lv_style_set_flex_main_place(&s_stRowTall, LV_FLEX_ALIGN_SPACE_EVENLY);
+    lv_style_set_flex_main_place(&s_stRowTall, LV_FLEX_ALIGN_START);
     lv_style_set_flex_cross_place(&s_stRowTall, LV_FLEX_ALIGN_START);
 
     lv_style_init(&s_stLbl);
@@ -1128,9 +1208,10 @@ static void set_styles_init(void) {
     lv_style_set_text_color(&s_stLbl, UI_SOFT);
 
     lv_style_init(&s_stBtn);
-    lv_style_set_width(&s_stBtn, s_bigText ? 172 : 136);
+    lv_style_set_width(&s_stBtn, s_bigText ? 164 : 136);
     lv_style_set_height(&s_stBtn, s_bigText ? 36 : 32);
     lv_style_set_radius(&s_stBtn, 16);
+    lv_style_set_pad_hor(&s_stBtn, 8);
     lv_style_set_bg_color(&s_stBtn, UI_PANEL);
     lv_style_set_bg_opa(&s_stBtn, LV_OPA_COVER);
     lv_style_set_border_color(&s_stBtn, UI_GREEN);
@@ -1145,6 +1226,9 @@ static void set_styles_init(void) {
     lv_style_init(&s_stBtnLbl);
     lv_style_set_text_font(&s_stBtnLbl, F14());
     lv_style_set_text_color(&s_stBtnLbl, UI_GREEN);
+    lv_style_set_width(&s_stBtnLbl, lv_pct(100));      // fixed one-line box: long WiFi names end in "..."
+    lv_style_set_height(&s_stBtnLbl, lv_font_get_line_height(F14()));
+    lv_style_set_text_align(&s_stBtnLbl, LV_TEXT_ALIGN_CENTER);
 
     lv_style_init(&s_stTrack);                          // slider + switch background
     lv_style_set_bg_color(&s_stTrack, lv_color_hex(0x1F3A2B));
@@ -1188,7 +1272,6 @@ static lv_obj_t *set_row(const char *label, bool tall) {
 
 static void set_add_slider(int id, const char *label, int lo, int hi) {
     lv_obj_t *r = set_row(label, true);
-    if (id == UI_SET_VOLUME) s_setVolRow = r;
     lv_obj_t *s = lv_slider_create(r);
     lv_obj_remove_style_all(s);                         // drop the theme's styles: ours are shared
     lv_obj_add_style(s, &s_stTrack, LV_PART_MAIN);
@@ -1217,6 +1300,8 @@ static void set_add_switch(int id, const char *label) {
 }
 
 // Tap button showing the current option; returns its label.
+// user == SET_BTN_SELF: the click callback gets the button's own label as user data.
+#define SET_BTN_SELF ((void *)-1)
 static lv_obj_t *set_add_button(const char *label, lv_event_cb_t cb, void *user) {
     lv_obj_t *r = set_row(label, false);
     lv_obj_t *b = lv_obj_create(r);                     // plain obj: lighter than lv_btn + theme
@@ -1225,15 +1310,22 @@ static lv_obj_t *set_add_button(const char *label, lv_event_cb_t cb, void *user)
     lv_obj_add_style(b, &s_stBtnPr, LV_STATE_PRESSED);
     lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(b, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user);
     lv_obj_t *l = lv_label_create(b);
     lv_obj_add_style(l, &s_stBtnLbl, 0);
+    lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
     lv_label_set_text(l, "-");
+    lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user == SET_BTN_SELF ? (void *)l : user);
     return l;
 }
 
 static void set_add_cycle(int id, const char *label) {
     s_setWidget[id] = set_add_button(label, set_cycle_cb, (void *)(intptr_t)id);
+}
+
+static void set_add_confirm(const char *label, const ConfirmAction *act) {
+    lv_obj_t *l = set_add_button(label, confirm_cb, SET_BTN_SELF);
+    lv_obj_set_user_data(l, (void *)act);
+    lv_label_set_text(l, act->text);
 }
 
 // Der Inhalt (die Liste) entsteht erst, wenn die Seite ins Bild geschoben wird, und wird beim
@@ -1251,34 +1343,53 @@ static void settings_open(void) {
     lv_obj_set_flex_flow(s_setList, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(s_setList, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_setList, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_style_pad_bottom(s_setList, 70, 0);   // the last rows can scroll up out of the round edge
+    lv_obj_set_style_pad_bottom(s_setList, 90, 0);   // the last rows can scroll up out of the round edge
 
     set_add_slider(UI_SET_BRIGHT, "Helligkeit", 5, 255);
-    set_add_slider(UI_SET_VOLUME, "Lautstärke", 0, 100);
-    set_add_switch(UI_SET_MUTE, "Töne stumm");
-    set_add_cycle(UI_SET_ALERTS, "Hinweiston");
+    if (s_setSound) {
+        set_add_cycle(UI_SET_SOUND, "Ton");
+        set_add_cycle(UI_SET_ALERTS, "Hinweiston bei");
+    }
     s_setThemeLbl = set_add_button("Design", set_theme_cb, nullptr);
     set_add_cycle(UI_SET_UNITS, "Einheiten");
     set_add_cycle(UI_SET_TRAIL, "Flugspuren");
+    set_add_cycle(UI_SET_ROTATE, "Bild drehen");
     set_add_switch(UI_SET_SWEEP, "Radar-Sweep");
     set_add_switch(UI_SET_AIRPORTS, "Flughäfen");
     set_add_switch(UI_SET_HIDEGROUND, "Am Boden ausblenden");
     set_add_switch(UI_SET_CLOCK, "Uhr im Ruhezustand");
+    set_add_switch(UI_SET_WIFI, "WLAN");
+    if (s_netCount) set_add_cycle(UI_SET_WIFINET, "WLAN-Netz");
+    if (s_netAdd)   set_add_confirm("WLAN hinzufügen", &kActWifiAdd);
+
+    // QR code of the web page: point a phone camera at it to open the settings there
+    lv_obj_t *qr = set_row("Webseite (mit dem Handy scannen)", true);
+    lv_obj_set_style_flex_cross_place(qr, LV_FLEX_ALIGN_CENTER, 0);
+    s_setQr = lv_qrcode_create(qr, s_bigText ? 150 : 132, lv_color_black(), UI_INK);
+    lv_obj_set_style_border_color(s_setQr, UI_INK, 0);   // a quiet zone: scanners need a light margin
+    lv_obj_set_style_border_width(s_setQr, 6, 0);
+    s_setUrlLbl = lv_label_create(qr);
+    lv_obj_add_style(s_setUrlLbl, &s_stBtnLbl, 0);
+    lv_obj_set_height(s_setUrlLbl, LV_SIZE_CONTENT);
+    set_url_refresh();
+
+    if (s_poweroffCb) set_add_confirm("Gerät", &kActPowerOff);
 
     lv_obj_t *hint = lv_label_create(s_setList);
     lv_obj_add_style(hint, &s_stHint, 0);
-    lv_label_set_text(hint, "Standort, Reichweite, WLAN und mehr:\ncapsuleradar.local");
+    lv_label_set_text(hint, "Standort, Reichweite, Foto und mehr\nauf der Webseite");
 
-    ui_set_settings_volume(s_setShowVolume);
     ui_settings_refresh();
 }
 
 static void settings_close(void) {
     if (!s_setList) return;
+    confirm_disarm();
     lv_obj_del(s_setList);   // takes every row with it
     s_setList = nullptr;
-    s_setVolRow = nullptr;
     s_setThemeLbl = nullptr;
+    s_setQr = nullptr;
+    s_setUrlLbl = nullptr;
     for (lv_obj_t *&w : s_setWidget) w = nullptr;
 }
 
@@ -1286,15 +1397,55 @@ static void build_settings(void) {
     set_styles_init();
     lv_obj_clear_flag(s_tileSettings, LV_OBJ_FLAG_SCROLLABLE);
     s_setPanel = make_round_panel(s_tileSettings);
-    make_tile_title(s_setPanel, "EINSTELLUNGEN");
+    make_tile_title(s_setPanel, UI_SETTINGS_TITLE);
 }
 
-// View index (0 radar, 1 list, 2 stats, 3 weather, 4 settings) -> tile column. The settings
-// tile sits left of the radar (column 0), so views 0..3 are columns 1..4.
+// --------------------------------------------------------------------- photo
+// Foto-Seite ganz links: das über die Webseite hochgeladene Bild, bildschirmfüllend. Die
+// Pixel liegen im PSRAM (user_photo.cpp); LVGL zeichnet direkt daraus, ohne eigenen Heap.
+static lv_obj_t *s_userImg = nullptr, *s_userHint = nullptr;
+static lv_img_dsc_t s_userDsc;
+
+void ui_set_user_photo(const uint16_t *px) {
+    if (!s_userImg) return;
+    if (px) {
+        lv_img_cache_invalidate_src(&s_userDsc);
+        memset(&s_userDsc, 0, sizeof(s_userDsc));
+        s_userDsc.header.always_zero = 0;
+        s_userDsc.header.w = SCREEN_W;
+        s_userDsc.header.h = SCREEN_H;
+        s_userDsc.header.cf = LV_IMG_CF_TRUE_COLOR;
+        s_userDsc.data_size = (uint32_t)SCREEN_W * SCREEN_H * 2;
+        s_userDsc.data = (const uint8_t *)px;
+        lv_img_set_src(s_userImg, &s_userDsc);
+        lv_obj_clear_flag(s_userImg, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_userHint, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_userImg, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_userHint, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void build_photo(void) {
+    lv_obj_clear_flag(s_tilePhoto, LV_OBJ_FLAG_SCROLLABLE);
+    s_userImg = lv_img_create(s_tilePhoto);
+    lv_obj_center(s_userImg);
+    lv_obj_add_flag(s_userImg, LV_OBJ_FLAG_HIDDEN);
+    s_userHint = lv_label_create(s_tilePhoto);
+    lv_obj_set_style_text_font(s_userHint, F16(), 0);
+    lv_obj_set_style_text_color(s_userHint, UI_SOFT, 0);
+    lv_obj_set_style_text_align(s_userHint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(s_userHint, "Noch kein Foto.\n\nHochladen auf der Webseite\ncapsuleradar.local");
+    lv_obj_center(s_userHint);
+}
+
+// View index (0 radar, 1 list, 2 stats, 3 weather, 4 settings, 5 photo) -> tile column.
+// Photo | Settings | Radar | List | Stats | Weather: views 0..3 are columns 2..5.
 void ui_show_view(int idx) {
-    if (!s_tv || idx < 0 || idx > 4) return;
+    if (!s_tv || idx < 0 || idx > 5) return;
     if (idx == 4) settings_open();
-    lv_obj_set_tile_id(s_tv, idx == 4 ? 0 : (uint32_t)(idx + 1), 0, LV_ANIM_OFF);
+    const uint32_t col = idx == 5 ? 0 : (idx == 4 ? 1 : (uint32_t)(idx + 2));
+    lv_obj_set_tile_id(s_tv, col, 0, LV_ANIM_OFF);
 }
 
 // ------------------------------------------------------------------- splash
@@ -1372,18 +1523,21 @@ void ui_create(void) {
     lv_obj_set_style_bg_opa(s_tv, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(s_tv, LV_SCROLLBAR_MODE_OFF);
 
-    // Settings | Radar | List | Stats | Weather -- swipe right on the radar for the settings.
-    s_tileSettings = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
-    s_tileRadar = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);
-    s_tileList  = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
-    s_tileStats = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
-    s_tileWeather = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_LEFT);
+    // Photo | Settings | Radar | List | Stats | Weather -- swipe right on the radar for the
+    // settings, once more for the photo.
+    s_tilePhoto    = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);
+    s_tileSettings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);
+    s_tileRadar = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
+    s_tileList  = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
+    s_tileStats = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);
+    s_tileWeather = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);
     // Rebuild the list/stats with the latest data the moment they slide into view
     // (between polls they'd otherwise show whatever was there when last visible).
     // Settings content lives only while its tile is (partly) on screen: build it as soon as a
     // swipe starts to reveal column 0, drop it once the swipe settles on another tile.
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) {
-        if (lv_obj_get_scroll_x(s_tv) < SCREEN_W) settings_open();
+        const lv_coord_t x = lv_obj_get_scroll_x(s_tv);
+        if (x > 0 && x < 2 * SCREEN_W) settings_open();   // column 1 (settings) partly on screen
     }, LV_EVENT_SCROLL, nullptr);
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) {
         if (lv_tileview_get_tile_act(s_tv) != s_tileSettings) settings_close();
@@ -1792,7 +1946,8 @@ void ui_create(void) {
 
     build_settings();
 
-    lv_obj_set_tile_id(s_tv, 1, 0, LV_ANIM_OFF);   // start on the radar (column 1)
+    build_photo();
+    lv_obj_set_tile_id(s_tv, 2, 0, LV_ANIM_OFF);   // start on the radar (column 2)
 
     ui_splash_show();   // branded boot splash on top (auto-fades)
 }

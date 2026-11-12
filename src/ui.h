@@ -23,25 +23,32 @@ void ui_set_large_text(bool on);             // accessibility: bigger fonts ever
 void ui_set_weather_forecast(bool forecast); // false = WX radar, true = 3-day forecast
 void ui_set_poweroff_cb(void (*cb)(void));   // Stats view: hold the Power off button
 
-// ---- Einstellungen-Seite (links vom Radar) ----
+// ---- Einstellungen-Seite (links vom Radar) und Foto-Seite (noch eine weiter links) ----
 // Die Seite liest die aktuellen Werte über den Getter (beim Aufbau und jedes Mal, wenn sie
 // eingeblendet wird -- so zeigt sie auch Änderungen von der Webseite) und meldet Änderungen
 // über den Setter. save=false: Schieberegler wird noch gezogen (nur live anwenden),
 // save=true: endgültiger Wert (anwenden + speichern). Das Design stellt die Seite selbst
-// über radar::setTheme() um (das speichert main.cpp schon über setThemeChangedCb).
+// über radar::setTheme() um (das speichert main.cpp schon über setThemeChangedCb), das
+// Ausschalten läuft über ui_set_poweroff_cb().
 enum UiSetting {
     UI_SET_BRIGHT,      // 5..255
-    UI_SET_VOLUME,      // 0..100
-    UI_SET_MUTE,        // 0/1
+    UI_SET_SOUND,       // Pegel: 0 Aus / 1 Leise / 2 Laut;  Summer: 0 Aus / 1 An
+    UI_SET_ALERTS,      // 0..2  (Aus / Nur Notfälle / Neue Flugzeuge + Notfälle)
     UI_SET_UNITS,       // 0..2  (Luftfahrt / Metrisch / Imperial)
     UI_SET_TRAIL,       // 0..3  (Aus / Kurz / Mittel / Lang)
+    UI_SET_ROTATE,      // 0..3  (0 / 90 / 180 / 270 Grad)
     UI_SET_SWEEP,       // 0/1
     UI_SET_AIRPORTS,    // 0/1
     UI_SET_HIDEGROUND,  // 0/1
     UI_SET_CLOCK,       // 0/1
-    UI_SET_ALERTS,      // 0..2  (Aus / Nur Notfälle / Neue Flugzeuge + Notfälle)
+    UI_SET_WIFI,        // 0/1   (aus = bis zum nächsten Neustart)
+    UI_SET_WIFINET,     // Index des gespeicherten WLANs (siehe ui_set_settings_wifi_cb)
     UI_SET_COUNT
 };
 void ui_set_settings_cb(int (*get)(int id), void (*set)(int id, int value, bool save));
-void ui_set_settings_volume(bool show);      // false: Lautstärke-Regler ausblenden (Buzzer ohne Pegel)
+void ui_set_settings_sound(int mode);        // 0 = kein Ton (Zeilen ausblenden), 1 = nur Aus/An (Summer), 2 = Aus/Leise/Laut
+// Gespeicherte WLANs: Anzahl, Name Nr. i, und "WLAN hinzufügen" (öffnet das Einrichtungsportal).
+void ui_set_settings_wifi_cb(int (*count)(void), const char *(*name)(int i), void (*add)(void));
+void ui_set_settings_url(const char *url);   // Adresse der Webseite für den QR-Code ("" = kein WLAN)
 void ui_settings_refresh(void);              // Werte neu einlesen (z. B. nach einer Änderung über die Webseite)
+void ui_set_user_photo(const uint16_t *px);  // Foto-Seite: SCREEN_W x SCREEN_H RGB565 (PSRAM) oder nullptr
