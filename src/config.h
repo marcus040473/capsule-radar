@@ -1,10 +1,12 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de6"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de7"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
+// Name auf dem Startbild (zwei Zeilen, damit er auf das runde Display passt).
+#define UI_SPLASH_TITLE   "LISAS FLUG- &\nWETTERRADAR"
 
 // ---------- Home location (default: Dénia, Spain) ----------
 // Overridable at runtime via the captive portal (stored in NVS).

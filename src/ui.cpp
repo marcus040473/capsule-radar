@@ -1527,7 +1527,7 @@ void ui_splash_show(void) {
         lv_obj_t *r = lv_obj_create(cont);
         lv_obj_remove_style_all(r);
         lv_obj_set_size(r, dia[i], dia[i]);
-        lv_obj_align(r, LV_ALIGN_CENTER, 0, -8);
+        lv_obj_align(r, LV_ALIGN_CENTER, 0, -26);   // a little higher: room for a two-line name
         lv_obj_set_style_radius(r, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_border_color(r, UI_GREEN, 0);
         lv_obj_set_style_border_opa(r, op[i], 0);
@@ -1537,22 +1537,23 @@ void ui_splash_show(void) {
     // rotating sweep
     lv_obj_t *sweep = lv_spinner_create(cont, 1400, 55);
     lv_obj_set_size(sweep, 210, 210);
-    lv_obj_align(sweep, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_align(sweep, LV_ALIGN_CENTER, 0, -26);
     lv_obj_set_style_arc_opa(sweep, 0, LV_PART_MAIN);
     lv_obj_set_style_arc_color(sweep, UI_GREEN, LV_PART_INDICATOR);
     lv_obj_set_style_arc_width(sweep, 4, LV_PART_INDICATOR);
 
     lv_obj_t *title = lv_label_create(cont);
-    lv_label_set_text(title, "CAPSULE RADAR");
+    lv_label_set_text(title, UI_SPLASH_TITLE);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(title, UI_GREEN, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, 118);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, 112);
 
     lv_obj_t *sub = lv_label_create(cont);
     lv_label_set_text(sub, "Live-ADS-B-Radar");
     lv_obj_set_style_text_font(sub, F14(), 0);
     lv_obj_set_style_text_color(sub, UI_SOFT, 0);
-    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 150);
+    lv_obj_align(sub, LV_ALIGN_CENTER, 0, 160);
 
     lv_timer_t *t = lv_timer_create(splash_dismiss_cb, 2200, cont);   // hold, then fade out
     lv_timer_set_repeat_count(t, 1);
