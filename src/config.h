@@ -5,6 +5,8 @@
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
+// Name des Geräts auf Webseite, Update-Seite, WLAN-Portal und Statistik-Seite.
+#define UI_APP_NAME       "Lisas Flug- & Wetterradar"
 // Name auf dem Startbild (zwei Zeilen, damit er auf das runde Display passt).
 #define UI_SPLASH_TITLE   "LISAS FLUG- &\nWETTERRADAR"
 
