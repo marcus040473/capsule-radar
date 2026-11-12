@@ -13,6 +13,8 @@
 #include "route_client.h"
 #include "photo.h"
 #include "photo_client.h"
+#include "map_bg.h"                   // map under the radar (portable part)
+#include "map_client.h"               // its tile downloads (core 0)
 #include "user_photo.h"               // own photo for the photo page (LittleFS + PSRAM)
 #include <LittleFS.h>
 #include "weather.h"
@@ -80,6 +82,7 @@ static int                   g_minAltFt     = 0;                     // only sho
 static int                   g_maxAltFt     = 0;                     // only show aircraft below this altitude, ft (0 = off) (web/NVS)
 static int                   g_lastView     = 0;                     // last active view (0 radar/1 list/2 stats/3 weather) (NVS)
 static bool                  g_bootedIntoPortal = false;             // saved WiFi absent at boot (e.g. car hotspot not up yet)
+static int                   g_mapMode = 1;                          // map under the radar: 0 off, 1 dark, 2 bright (NVS "mapmode")
 static bool                  g_wifiOff = false;                      // WLAN switched off on the settings page (until the next boot)
 static uint32_t              g_addingWifiUntil = 0;                  // portal opened to ADD a network: no background reconnects till then
 static bool                  g_milOnly      = false;                 // only show military-flagged aircraft (web/NVS)
@@ -300,6 +303,7 @@ static void adsb_task(void*) {
             }
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
+            map_client_service(g_mapMode > 0);   // map under the radar: at most one tile per pass
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -326,6 +330,7 @@ static void loadSettings() {
     g_fdSleep          = p.getBool("fdsleep", true);
     g_clockOn          = p.getBool("clock", true);
     g_units            = p.getInt("units", 1);   // DE: km, m, km/h unless chosen otherwise
+    g_mapMode          = constrain(p.getInt("mapmode", 1), 0, 2);
     g_tempUnit         = p.getInt("tempu", 0);
     g_tz               = p.getString("tz", TZ_STR);
     g_bigText          = p.getBool("bigtext", false);
@@ -1246,6 +1251,7 @@ static int deviceSettingGet(int id) {
         case UI_SET_WIFI:       return g_wifiOff ? 0 : 1;
         case UI_SET_WIFINET:    return netsCurrent();
         case UI_SET_GPS:        return g_useGps ? 1 : 0;
+        case UI_SET_MAP:        return g_mapMode;
         default:                return 0;
     }
 }
@@ -1321,6 +1327,10 @@ static void deviceSettingSet(int id, int v, bool save) {
                 Serial.println("[wifi] switched on again -> restarting");
                 g_rebootAtMs = millis() + 300;
             }
+            break;
+        case UI_SET_MAP:
+            g_mapMode = constrain(v, 0, 2);       // loop() re-tints / hides; core 0 loads tiles only when on
+            nvsPutInt("mapmode", g_mapMode);
             break;
         case UI_SET_GPS:                          // like the web page's "GPS für den Standort"
             g_useGps = v != 0;
@@ -1578,6 +1588,7 @@ void setup() {
     // ArduinoOTA is started from loop() once WiFi connects (see otaUp there).
 
     // --- ADS-B client + task ----------------------------------------------
+    map_bg_begin();       // map buffers in PSRAM (~0.9 MB); tiles load once WiFi is up
     user_photo_begin();   // LittleFS + first decode of the own photo (on core 0, once adsb_task runs)
 
     float queryKm = queryRadiusKm();
@@ -1725,6 +1736,8 @@ void loop() {
     }
 
     { const uint16_t *px; if (user_photo_take(&px)) ui_set_user_photo(px); }   // own photo decoded on core 0
+    map_bg_set_view(g_settings.homeLat, g_settings.homeLon, g_settings.rangeKm, (float)g_settings.rotationDeg);
+    map_bg_ui_tick(g_mapMode);           // take/tint new map pictures (built on core 0)
 
     // OTA: set up once WiFi is up, then service it every loop (flash over the air)
     static bool otaUp = false;

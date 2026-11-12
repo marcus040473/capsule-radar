@@ -5,6 +5,7 @@
 #include <vector>
 #include "aircraft.h"
 #include "clock_face.h"
+#include <lvgl.h>   // lv_img_dsc_t (setMap)
 
 struct RadarSettings {
     double homeLat, homeLon;
@@ -79,6 +80,8 @@ void setSweepCompositor(void (*config)(uint16_t ring565, uint16_t lead565, uint1
                         void (*tick)(), float (*angle)());
 bool sweepEnabled();
 void setAirportsEnabled(bool on);                // show/hide airport markers on the scope
+void setMap(const lv_img_dsc_t *img);            // map background under the scope (map_bg.cpp); nullptr = none
+bool mapShown();                                 // a map is drawn (UI shows its attribution)
 bool airportsEnabled();
 void setTrailLength(int level);                  // 0=off 1=short 2=medium 3=long (aircraft trails + flow)
 void setMaxOnScreen(int n);                       // how many (nearest) aircraft to draw on the scope

@@ -21,6 +21,7 @@
 #include "wx_radar.h"
 #include "cloud_image.h"
 #include "aircraft.h"
+#include "map_bg.h"
 #include <vector>
 #include <cmath>
 
@@ -101,7 +102,46 @@ static Aircraft mk(const char *call, const char *hex, double distKm, double brgD
     return a;
 }
 
-static void sim_range_cb(float km) { g_set.rangeKm = km; radar::update(g_mockAcs, g_set); ui_set_range_km(km); }
+// Map under the radar: the device downloads CARTO tiles; the simulator paints test tiles
+// instead -- a grid every 0.25 degrees and a circle exactly on the radar's third ring
+// (160/218 of the range), which shows that the map projection lines up with the scope.
+static uint8_t s_simTile[MAP_TILE_PX * MAP_TILE_PX];
+static void sim_map_tile(const MapTile &t) {
+    const double W = (double)MAP_TILE_PX * (1 << t.z);
+    const double ringKm = g_set.rangeKm * 160.0 / 218.0;
+    const double latH = g_set.homeLat * M_PI / 180.0, lonH = g_set.homeLon * M_PI / 180.0;
+    const double kmPerPx = 40075.016686 * cos(latH) / W;
+    const double gridTol = 0.0015 * (1 << (12 - (t.z > 12 ? 12 : t.z)));
+    for (int py = 0; py < MAP_TILE_PX; ++py)
+        for (int px = 0; px < MAP_TILE_PX; ++px) {
+            const double wx = (double)t.x * MAP_TILE_PX + px, wy = (double)t.y * MAP_TILE_PX + py;
+            const double lon = wx / W * 360.0 - 180.0;
+            const double lat = atan(sinh(M_PI * (1.0 - 2.0 * wy / W))) * 180.0 / M_PI;
+            const double la = lat * M_PI / 180.0, lo = lon * M_PI / 180.0;
+            const double a = sin((la - latH) / 2) * sin((la - latH) / 2) +
+                             cos(la) * cos(latH) * sin((lo - lonH) / 2) * sin((lo - lonH) / 2);
+            const double dKm = 2 * 6371.0 * asin(sqrt(a));
+            uint8_t v = 14;                                                   // CARTO-like ground
+            if (fabs(fmod(lat + 360.0, 0.25)) < gridTol || fabs(fmod(lon + 360.0, 0.25)) < gridTol) v = 70;
+            if (fabs(dKm - ringKm) < kmPerPx * 1.5) v = 200;
+            s_simTile[py * MAP_TILE_PX + px] = v;
+        }
+}
+static void sim_map_refresh(void) {
+    map_bg_begin();
+    map_bg_set_view(g_set.homeLat, g_set.homeLon, g_set.rangeKm, (float)g_set.rotationDeg);
+    map_bg_ui_tick(1);                          // hand over anything pending first
+    const int n = map_bg_replan();
+    for (int i = 0; i < n; ++i) {
+        MapTile t;
+        if (!map_bg_tile(i, &t)) break;
+        sim_map_tile(t);
+        map_bg_compose_tile(i, s_simTile);
+        map_bg_ui_tick(1);                      // tint + hand to the radar (like loop() on core 1)
+    }
+    printf("[sim] map: %d test tiles\n", n);
+}
+static void sim_range_cb(float km) { g_set.rangeKm = km; radar::update(g_mockAcs, g_set); ui_set_range_km(km); sim_map_refresh(); }
 
 static void mock_init() {
     g_set.homeLat = HOME_LAT_DEFAULT;
@@ -251,6 +291,7 @@ int main(int argc, char **argv) {
     ui_set_settings_url("http://192.168.1.42/");
     ui_set_gps_present(true);          // mock a -G board: GPS switch + signal line
     ui_set_gps(2, 9, 120.0f);
+    if (!getenv("NOMAP")) { mock_init(); sim_map_refresh(); }   // NOMAP=1: the plain scope
     sim_make_photo();
     ui_set_user_photo(s_simPhoto);
     mock_init();

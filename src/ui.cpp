@@ -469,8 +469,14 @@ void ui_set_battery(int pct, bool charging, bool present) {
     lv_obj_set_style_text_color(s_hudBatt, (pct <= 15 && !charging) ? UI_EMERG : UI_INK, 0);
 }
 
+static lv_obj_t *s_mapAttr = nullptr;   // "Karte (c) OSM, CARTO" under the date while a map is drawn
 void ui_set_date(const char *date) {
     if (s_hudDate && date) lv_label_set_text(s_hudDate, date);
+    // called every second: also keep the map attribution in step with the map
+    if (s_mapAttr && !s_clockUp) {
+        if (radar::mapShown()) lv_obj_clear_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
+        else                   lv_obj_add_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void ui_set_netinfo(const char *line) {
@@ -825,12 +831,13 @@ static void clock_stage_cb(int stage) {
     const bool up = stage != 0;
     if (up == s_clockUp) return;
     s_clockUp = up;
-    lv_obj_t *chrome[] = { s_hudWifi, s_hudGps, s_hudCount, s_hudClock, s_hudBatt, s_hudDate, s_zoomBtn };
+    lv_obj_t *chrome[] = { s_hudWifi, s_hudGps, s_hudCount, s_hudClock, s_hudBatt, s_hudDate, s_zoomBtn, s_mapAttr };
     for (lv_obj_t *o : chrome) {
         if (!o) continue;
         if (up) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
         else    lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     }
+    if (!up && s_mapAttr && !radar::mapShown()) lv_obj_add_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);   // no map: stays hidden
     refresh_card();                         // hides the card while the clock is up, restores it after
     if (!s_clockCatcher) return;
     if (up) lv_obj_clear_flag(s_clockCatcher, LV_OBJ_FLAG_HIDDEN);
@@ -1031,6 +1038,7 @@ static const char *const kSetOnOff[]  = { "Aus", "An" };
 static const char *const kSetUnits[]  = { "Luftfahrt", "Metrisch", "Imperial" };
 static const char *const kSetTrail[]  = { "Aus", "Kurz", "Mittel", "Lang" };
 static const char *const kSetAlerts[] = { "Aus", "Nur Notfälle", "Neue + Notfälle" };
+static const char *const kSetMap[]    = { "Aus", "Dunkel", "Hell" };
 static const char *const kSetRotate[] = { "0\xC2\xB0", "90\xC2\xB0", "180\xC2\xB0", "270\xC2\xB0" };
 static const char *const kSetThemes[] = { "Phosphor", "Orb", "Amber CRT", "Militär" };
 
@@ -1041,6 +1049,7 @@ static int set_option_count(int id) {
         case UI_SET_UNITS:   return 3;
         case UI_SET_TRAIL:   return 4;
         case UI_SET_ROTATE:  return 4;
+        case UI_SET_MAP:     return 3;
         case UI_SET_WIFINET: return s_netCount ? s_netCount() : 0;
         default:             return 0;
     }
@@ -1056,6 +1065,7 @@ static const char *set_option_text(int id, int v) {
         case UI_SET_UNITS:   return kSetUnits[v];
         case UI_SET_TRAIL:   return kSetTrail[v];
         case UI_SET_ROTATE:  return kSetRotate[v];
+        case UI_SET_MAP:     return kSetMap[v];
         case UI_SET_WIFINET: { const char *s = s_netName ? s_netName(v) : nullptr; return (s && *s) ? s : "?"; }
         default:             return "-";
     }
@@ -1373,6 +1383,7 @@ static void settings_open(void) {
         set_add_cycle(UI_SET_ALERTS, "Hinweiston bei");
     }
     s_setThemeLbl = set_add_button("Design", set_theme_cb, nullptr);
+    set_add_cycle(UI_SET_MAP, "Karte");
     set_add_cycle(UI_SET_UNITS, "Einheiten");
     set_add_cycle(UI_SET_TRAIL, "Flugspuren");
     set_add_cycle(UI_SET_ROTATE, "Bild drehen");
@@ -1654,6 +1665,15 @@ void ui_create(void) {
     lv_obj_set_style_text_opa(s_hudDate, 140, 0);
     lv_label_set_text(s_hudDate, "");
     lv_obj_align(s_hudDate, LV_ALIGN_TOP_MID, 0, 70);
+
+    // map attribution (OpenStreetMap + CARTO ask for it wherever their map is shown)
+    s_mapAttr = lv_label_create(s_tileRadar);
+    lv_obj_set_style_text_font(s_mapAttr, F12(), 0);
+    lv_obj_set_style_text_color(s_mapAttr, UI_INK, 0);
+    lv_obj_set_style_text_opa(s_mapAttr, 110, 0);
+    lv_label_set_text(s_mapAttr, "Karte \xC2\xA9 OpenStreetMap, CARTO");
+    lv_obj_align(s_mapAttr, LV_ALIGN_TOP_MID, 0, s_bigText ? 92 : 86);
+    lv_obj_add_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
 
     // The theme hold's hint (radar_pressing_cb), styled like the zoom button and centred like
     // the detail card. Opaque: while it shows, it sits over the middle of an open card.

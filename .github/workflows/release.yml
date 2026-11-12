@@ -114,7 +114,7 @@ jobs:
           generate_release_notes: false
           body: |
             **Capsule Radar – deutsche Version.** Display, Konfigurationsseite und WLAN-Einrichtung auf Deutsch (mit Umlauten).
-            **Am Gerät:** auf dem Radar nach rechts wischen = Einstellungen (Ton, Design, Bild drehen, WLAN an/aus, WLAN wählen/hinzufügen, QR-Code zur Webseite, Ausschalten …). Noch einmal wischen = Foto-Seite – das Foto auf der Webseite `capsuleradar.local` hochladen.
+            **Am Gerät:** auf dem Radar nach rechts wischen = Einstellungen (Ton, Design, Bild drehen, WLAN an/aus, WLAN wählen/hinzufügen, QR-Code zur Webseite, Ausschalten …). **Karte unter dem Radar** (Einstellungen → Karte: Aus / Dunkel / Hell). Noch einmal wischen = Foto-Seite – das Foto auf der Webseite `capsuleradar.local` hochladen.
 
             Es werden drei Boards unterstützt. Die Datei muss zu Ihrem Board passen:
 

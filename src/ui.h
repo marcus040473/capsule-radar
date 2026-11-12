@@ -44,6 +44,7 @@ enum UiSetting {
     UI_SET_WIFI,        // 0/1   (aus = bis zum nächsten Neustart)
     UI_SET_WIFINET,     // Index des gespeicherten WLANs (siehe ui_set_settings_wifi_cb)
     UI_SET_GPS,         // 0/1   GPS-Standort (nur mit GPS-Modul, "-G"-Board)
+    UI_SET_MAP,         // 0..2  Karte unter dem Radar: Aus / Dunkel / Hell
     UI_SET_COUNT
 };
 void ui_set_settings_cb(int (*get)(int id), void (*set)(int id, int value, bool save));

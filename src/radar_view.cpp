@@ -76,6 +76,8 @@ static void      (*s_themeCb)(int) = nullptr;
 static lv_color_t s_cRing = COL_GREEN, s_cLead = COL_LEAD, s_cInk = COL_INK, s_cSoft = COL_SOFT;
 static lv_obj_t  *s_parent   = nullptr;
 static lv_obj_t  *s_gridLayer = nullptr;
+static lv_obj_t  *s_mapLayer  = nullptr;   // map background, the bottom-most layer (under the trails)
+static const lv_img_dsc_t *s_map = nullptr;   // map image (PSRAM, map_bg.cpp) or nullptr
 static lv_obj_t  *s_sweep     = nullptr;
 static lv_obj_t  *s_acLayer   = nullptr;
 static lv_obj_t  *s_flowCanvas = nullptr;
@@ -270,6 +272,17 @@ static void flow_redraw_all(void) {
 // exact on the AMOLED boards).
 #define SCOPE_PX(px) ((lv_coord_t)(((px) * RADAR_R_OUTER_PX + 109) / 218))
 
+// Map background (map_bg.cpp): one full-screen image, LVGL clips it to what needs redrawing.
+static void map_draw_cb(lv_event_t *e) {
+    if (!s_map || orb()) return;
+    lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+    lv_draw_img_dsc_t md;
+    lv_draw_img_dsc_init(&md);
+    md.opa = dim(LV_OPA_COVER);
+    const lv_area_t full = { 0, 0, SCREEN_W - 1, SCREEN_H - 1 };
+    lv_draw_img(d, &md, &full, s_map);
+}
+
 static void grid_draw_cb(lv_event_t *e) {
     lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
     const lv_point_t c = { s_cx, s_cy };
@@ -306,9 +319,12 @@ static void grid_draw_cb(lv_event_t *e) {
         return;
     }
 
-    // coastline first, so the rings/crosshair sit cleanly on top of it.
-    // Steel blue + 2 px so it reads as a map outline, distinct from the green altitude trails.
-    coastline_draw(d, COAST_COLOR, dim(165), 2);
+    // with a map (own layer, under the trails) the coast is already drawn: skip the outline
+    if (!s_map) {
+        // coastline first, so the rings/crosshair sit cleanly on top of it.
+        // Steel blue + 2 px so it reads as a map outline, distinct from the green altitude trails.
+        coastline_draw(d, COAST_COLOR, dim(165), 2);
+    }
     if (s_airportsEnabled) airports_draw(d, AIRPORT_COLOR, dim(150));
 
     // phosphor: concentric rings + crosshair
@@ -855,6 +871,13 @@ void setSweepCompositor(void (*config)(uint16_t ring565, uint16_t lead565, uint1
 }
 bool sweepEnabled() { return s_sweepEnabled; }
 
+void setMap(const lv_img_dsc_t *img) {
+    s_map = img;
+    if (s_mapLayer)  lv_obj_invalidate(s_mapLayer);
+    if (s_gridLayer) lv_obj_invalidate(s_gridLayer);   // repaint the chrome with/without the coast
+}
+bool mapShown() { return s_map != nullptr && !orb(); }
+
 void setAirportsEnabled(bool on) {
     s_airportsEnabled = on;
     if (s_gridLayer) lv_obj_invalidate(s_gridLayer);   // repaint the chrome with/without markers
@@ -917,6 +940,7 @@ void init(void *lv_parent) {
         s_flowBuf = (lv_color_t *)malloc(sz);
 #endif
     }
+    s_mapLayer = make_layer(parent, map_draw_cb);   // first = bottom-most
     s_flowCanvas = lv_canvas_create(parent);
     lv_obj_clear_flag(s_flowCanvas, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     if (s_flowBuf) {
