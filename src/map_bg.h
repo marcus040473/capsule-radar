@@ -1,11 +1,12 @@
 #pragma once
-// Karte unter dem Radar: dunkle OpenStreetMap-Karte (CARTO "dark_all") als Hintergrund,
-// in der Farbe des Designs eingefärbt.
+// Karte unter dem Radar: OpenStreetMap als dunkler Hintergrund, in der Farbe des Designs
+// eingefärbt. Quellen: OpenStreetMap-Standardkarte (ohne Schlüssel, hell -> wird auf dunkel
+// umgerechnet) oder, mit einem kostenlosen CARTO-Schlüssel, CARTO "dark_all" (schon dunkel).
 //
 // Ablauf
 //  - Kern 1 (loop): map_bg_set_view() mit Mittelpunkt, Reichweite und Drehung des Radars.
 //  - Kern 0 (adsb_task, map_client.cpp): map_bg_plan() wählt Zoomstufe und Kacheln, holt
-//    pro Aufruf EINE Kachel, dekodiert sie zu Helligkeit (512 x 512) und setzt sie mit
+//    pro Aufruf EINE Kachel, dekodiert sie zu Helligkeit (256 x 256) und setzt sie mit
 //    map_bg_compose_tile() an die richtige Stelle des Bildes (Web-Mercator -> Radar).
 //  - Kern 1: map_bg_ui_tick() übernimmt jedes neue Zwischenbild, färbt es ein und gibt es
 //    dem Radar (radar::setMap). Die Karte baut sich so Kachel für Kachel auf.
@@ -13,12 +14,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define MAP_TILE_PX 512                 // CARTO @2x-Kacheln
+#define MAP_TILE_PX 256                 // Standard-Kachelgröße (OSM und CARTO)
+
+enum MapSource { MAP_SRC_OSM = 0, MAP_SRC_CARTO = 1 };
 
 struct MapTile { int z, x, y; };        // x schon auf 0..2^z-1 gefaltet
 
 bool map_bg_begin(void);                                    // Puffer anlegen (PSRAM)
 void map_bg_set_view(double lat, double lon, float rangeKm, float rotDeg);   // Kern 1
+void map_bg_set_source(int src);                            // Kern 1: MapSource (neu laden, wenn anders)
+int  map_bg_source(void);                                   // Quelle der aktuellen Planung
+const char *map_bg_attribution(void);                       // Quellenvermerk der angezeigten Karte
 
 // ---- Kern 0 ----
 // Gewünschte Ansicht geändert (oder noch nicht geplant)? Dann neu planen: liefert die Anzahl

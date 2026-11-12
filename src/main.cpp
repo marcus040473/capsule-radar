@@ -82,6 +82,7 @@ static int                   g_minAltFt     = 0;                     // only sho
 static int                   g_maxAltFt     = 0;                     // only show aircraft below this altitude, ft (0 = off) (web/NVS)
 static int                   g_lastView     = 0;                     // last active view (0 radar/1 list/2 stats/3 weather) (NVS)
 static bool                  g_bootedIntoPortal = false;             // saved WiFi absent at boot (e.g. car hotspot not up yet)
+static String                g_cartoKey;                             // optional CARTO basemap key (web page); empty = OpenStreetMap
 static int                   g_mapMode = 1;                          // map under the radar: 0 off, 1 dark, 2 bright (NVS "mapmode")
 static bool                  g_wifiOff = false;                      // WLAN switched off on the settings page (until the next boot)
 static uint32_t              g_addingWifiUntil = 0;                  // portal opened to ADD a network: no background reconnects till then
@@ -331,6 +332,7 @@ static void loadSettings() {
     g_clockOn          = p.getBool("clock", true);
     g_units            = p.getInt("units", 1);   // DE: km, m, km/h unless chosen otherwise
     g_mapMode          = constrain(p.getInt("mapmode", 1), 0, 2);
+    g_cartoKey         = p.getString("cartokey", "");
     g_tempUnit         = p.getInt("tempu", 0);
     g_tz               = p.getString("tz", TZ_STR);
     g_bigText          = p.getBool("bigtext", false);
@@ -516,6 +518,16 @@ static bool refuseUnlessPageFetch() {
 #define VOL_HIDE ""
 #endif
 
+// Escape a value for an HTML attribute in single quotes.
+static String htmlAttr(const String &s) {
+    String o;
+    for (size_t i = 0; i < s.length(); ++i) {
+        const char c = s[i];
+        if (c == '\'') o += "&#39;"; else if (c == '&') o += "&amp;"; else if (c == '<') o += "&lt;"; else o += c;
+    }
+    return o;
+}
+
 static void handleRoot() {
     const int th = radar::theme();
     // The page's own list (WEB_RANGE_KM, config.h) ends at 150 km: it once offered 250,
@@ -691,6 +703,11 @@ static void handleRoot() {
         "<label>Anzeigebereich</label><select name=range>%s</select>"
         "<label>Design</label><select name=theme>%s</select>"
         "<label>Zeitzone</label><select name=tz>%s</select>"
+        "<label>Dunkle CARTO-Karte: Schlüssel (optional)</label><input name=ckey value='%s' autocomplete=off "
+        "placeholder='leer = OpenStreetMap-Karte'>"
+        "<div style='font-size:12px;opacity:.6;margin:2px 0 6px'>Kostenlos für private Nutzung: "
+        "<a href='https://carto.com/basemaps/apikey' target=_blank style='color:#9affc8'>carto.com/basemaps/apikey</a>. "
+        "Ohne Schlüssel zeigt das Radar die OpenStreetMap-Karte.</div>"
         "<button>Speichern &amp; neu starten</button></form></div>"
         "<div class=card><div class=t>Anzeige</div>"
         "<label>Helligkeit</label>"
@@ -785,7 +802,7 @@ static void handleRoot() {
         "if(b<0)for(i=0;i<e.options.length;i++){if(+e.options[i].dataset.off===o){b=i;break;}}"
         "if(b>=0)e.selectedIndex=b;})();</script></body></html>",
         g_settings.homeLat, g_settings.homeLon, gpsRow.c_str(), ropts.c_str(), topts.c_str(),
-        tzopts.c_str(),
+        tzopts.c_str(), htmlAttr(g_cartoKey).c_str(),
         g_brightnessDay, iopts.c_str(), g_clockOn ? "checked" : "", g_fdSleep ? "checked" : "", g_showSweep ? "checked" : "",
         g_showAirports ? "checked" : "", g_hideGround ? "checked" : "", maopts.c_str(), mbopts.c_str(), g_milOnly ? "checked" : "",
         tlopts.c_str(), mxopts.c_str(), g_bigText ? "checked" : "", g_rotation, uopts.c_str(), tuopts.c_str(),
@@ -833,6 +850,16 @@ static void handleSave() {
     if (g_web.hasArg("range")) p.putFloat("rangeKm", repairRangeKm((float)range));
     if (g_web.hasArg("theme")) p.putInt("theme", g_web.arg("theme").toInt());
     if (tzIdx >= 0 && tzIdx < TZOPTS_N) p.putString("tz", TZOPTS[tzIdx].tz);
+    if (g_web.hasArg("ckey")) {   // CARTO key: letters, digits, - and _ only (it goes into a URL)
+        String k = g_web.arg("ckey");
+        k.trim();
+        String clean;
+        for (size_t i = 0; i < k.length() && clean.length() < 72; ++i) {
+            const char ch = k[i];
+            if (isalnum((unsigned char)ch) || ch == '-' || ch == '_' || ch == '.') clean += ch;
+        }
+        p.putString("cartokey", clean);
+    }
     p.end();
     g_web.send(200, "text/html",
         "<meta charset=utf-8><meta http-equiv=refresh content='4;url=/'><body style='background:#06100a;color:#1dff86;"
@@ -1589,6 +1616,9 @@ void setup() {
 
     // --- ADS-B client + task ----------------------------------------------
     map_bg_begin();       // map buffers in PSRAM (~0.9 MB); tiles load once WiFi is up
+    g_cartoKey.trim();
+    map_client_set_carto_key(g_cartoKey.c_str());
+    map_bg_set_source(g_cartoKey.length() ? MAP_SRC_CARTO : MAP_SRC_OSM);   // no key: OpenStreetMap
     user_photo_begin();   // LittleFS + first decode of the own photo (on core 0, once adsb_task runs)
 
     float queryKm = queryRadiusKm();

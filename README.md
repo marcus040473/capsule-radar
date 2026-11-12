@@ -31,10 +31,12 @@
 > nie in der Firmware. Das Gerät merkt sich bis zu 5 WLANs und probiert beim Start reihum,
 > welches gerade da ist. Die Überschrift steht in `src/config.h` (`UI_SETTINGS_TITLE`).
 >
-> **Karte:** unter dem Radar liegt eine dunkle OpenStreetMap-Karte (CARTO „dark_all“,
-> © OpenStreetMap-Mitwirkende, © CARTO), in der Designfarbe eingefärbt. Sie wird über WLAN
-> geladen, Kachel für Kachel, sobald sich Standort oder Zoom ändern (`src/map_bg.*`,
-> `src/map_client.*`; ~0,9 MB PSRAM, kein LVGL-Speicher).
+> **Karte:** unter dem Radar liegt eine OpenStreetMap-Karte (© OpenStreetMap-Mitwirkende),
+> auf dunkel umgerechnet und in der Designfarbe eingefärbt. Ohne weitere Einrichtung kommt sie
+> von tile.openstreetmap.org (kein Schlüssel nötig). Wer die dunkle CARTO-Karte möchte, trägt
+> auf der Webseite einen kostenlosen CARTO-Schlüssel ein (carto.com/basemaps/apikey; ohne
+> Schlüssel liefert CARTO seit August 2026 nur „API KEY REQUIRED“-Kacheln). Geladen wird über
+> WLAN, Kachel für Kachel, mit Zwischenspeicher (`src/map_bg.*`, `src/map_client.*`; PSRAM).
 > Fertige Firmware-Dateien gibt es unter *Releases*;
 > wie man sie aufspielt, steht in den Release-Notizen.
 

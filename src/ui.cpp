@@ -9,6 +9,7 @@
 #include "cloud_image.h"
 #include "airports.h"
 #include "config.h"
+#include "map_bg.h"
 #include <lvgl.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -474,7 +475,11 @@ void ui_set_date(const char *date) {
     if (s_hudDate && date) lv_label_set_text(s_hudDate, date);
     // called every second: also keep the map attribution in step with the map
     if (s_mapAttr && !s_clockUp) {
-        if (radar::mapShown()) lv_obj_clear_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
+        if (radar::mapShown()) {
+            const char *a = map_bg_attribution();
+            if (strcmp(lv_label_get_text(s_mapAttr), a) != 0) lv_label_set_text(s_mapAttr, a);
+            lv_obj_clear_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
+        }
         else                   lv_obj_add_flag(s_mapAttr, LV_OBJ_FLAG_HIDDEN);
     }
 }

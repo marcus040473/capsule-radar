@@ -121,9 +121,9 @@ static void sim_map_tile(const MapTile &t) {
             const double a = sin((la - latH) / 2) * sin((la - latH) / 2) +
                              cos(la) * cos(latH) * sin((lo - lonH) / 2) * sin((lo - lonH) / 2);
             const double dKm = 2 * 6371.0 * asin(sqrt(a));
-            uint8_t v = 14;                                                   // CARTO-like ground
-            if (fabs(fmod(lat + 360.0, 0.25)) < gridTol || fabs(fmod(lon + 360.0, 0.25)) < gridTol) v = 70;
-            if (fabs(dKm - ringKm) < kmPerPx * 1.5) v = 200;
+            uint8_t v = 240;                                                  // OSM-like light ground
+            if (fabs(fmod(lat + 360.0, 0.25)) < gridTol || fabs(fmod(lon + 360.0, 0.25)) < gridTol) v = 185;   // road casing
+            if (fabs(dKm - ringKm) < kmPerPx * 1.5) v = 40;                   // dark like map text
             s_simTile[py * MAP_TILE_PX + px] = v;
         }
 }

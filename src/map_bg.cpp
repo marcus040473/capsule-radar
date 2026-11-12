@@ -22,9 +22,11 @@ static uint16_t *s_rgb = nullptr;       // Kern 1: eingefärbt, das zeigt das Ra
 static lv_img_dsc_t s_dsc;
 
 // Wunsch (Kern 1 schreibt, Kern 0 liest; ein Zähler macht Änderungen sichtbar)
-struct View { double lat, lon; float rangeKm, rotDeg; };
+struct View { double lat, lon; float rangeKm, rotDeg; int src; };
 static volatile uint32_t s_wantGen = 0;
-static View s_want = {0, 0, 0, 0};
+static View s_want = {0, 0, 0, 0, MAP_SRC_OSM};
+static int  s_planSrc = MAP_SRC_OSM;    // Kern 0: Quelle der laufenden Planung
+static volatile int s_backSrc = MAP_SRC_OSM, s_frontSrc = MAP_SRC_OSM;
 static uint32_t s_planGen = 0xFFFFFFFF; // Kern 0: für welche Ansicht geplant wurde
 
 // Plan (nur Kern 0)
@@ -60,6 +62,18 @@ void map_bg_set_view(double lat, double lon, float rangeKm, float rotDeg) {
     s_wantGen = s_wantGen + 1;
 }
 
+void map_bg_set_source(int src) {
+    if (src == s_want.src) return;
+    s_want.src = src;
+    s_wantGen = s_wantGen + 1;
+}
+
+int map_bg_source(void) { return s_planSrc; }
+
+const char *map_bg_attribution(void) {
+    return s_frontSrc == MAP_SRC_CARTO ? "Karte \xC2\xA9 OpenStreetMap, CARTO" : "Karte \xC2\xA9 OpenStreetMap";
+}
+
 bool map_bg_view_changed(void) { return s_planGen != s_wantGen; }
 
 int map_bg_replan(void) {
@@ -68,14 +82,17 @@ int map_bg_replan(void) {
     const uint32_t gen = s_wantGen;
     const View v = s_want;
     s_planGen = gen;
+    s_planSrc = v.src;
     s_tileN = 0;
     if (v.rangeKm <= 0.0f) return 0;
 
     const double latR = v.lat * M_PI / 180.0;
     const double mpp  = v.rangeKm * 1000.0 / RADAR_R_OUTER_PX;     // Meter je Bildschirmpixel
-    // Zoom so, dass ein Kachelpixel etwa ein Bildschirmpixel ist (Faktor 0,7 .. 1,4)
+    // Zoom: die nächstgröbere Stufe -- ein Kachelpixel wird 1..2 Bildschirmpixel. So reichen
+    // 2-3 Kacheln je Richtung (wenig Last für die Kartenserver), und die Beschriftung wird
+    // auf dem kleinen runden Display größer und lesbarer.
     const double worldPxWanted = EARTH_CIRC_M * cos(latR) / mpp;
-    int z = (int)lround(log2(worldPxWanted / MAP_TILE_PX));
+    int z = (int)floor(log2(worldPxWanted / MAP_TILE_PX));
     if (z < 2) z = 2;
     if (z > 16) z = 16;
     s_z = z;
@@ -122,7 +139,8 @@ int map_bg_replan(void) {
                 s_tiles[s_tileN].y = ty;
                 s_tileN++;                     // (compose unwraps x next to the centre again)
             }
-    memset(s_back, 0, NPIX);   // the next hand-over starts a fresh picture
+    memset(s_back, v.src == MAP_SRC_OSM ? 240 : 0, NPIX);   // fresh picture: the source's ground colour
+    s_backSrc = v.src;
     return s_tileN;
 }
 
@@ -153,7 +171,18 @@ bool map_bg_compose_tile(int i, const uint8_t *lum) {
         uint8_t *row = s_back + (size_t)y * SCREEN_W;
         for (int x = 0; x < SCREEN_W; ++x, wx += s_wxx, wy += s_wyx) {
             if (wx < 0.0f || wy < 0.0f || wx >= (float)MAP_TILE_PX || wy >= (float)MAP_TILE_PX) continue;
-            row[x] = lum[(int)wy * MAP_TILE_PX + (int)wx];
+            // bilinear: the tile is magnified up to 2x, nearest-neighbour would look blocky
+            const float fx = wx - 0.5f, fy = wy - 0.5f;
+            int x0 = (int)fx, y0 = (int)fy;
+            if (fx < 0.0f) x0 = -1;
+            if (fy < 0.0f) y0 = -1;
+            const int ax = (int)((fx - (float)x0) * 256.0f), ay = (int)((fy - (float)y0) * 256.0f);
+            const int xa = x0 < 0 ? 0 : x0, xb = x0 + 1 > MAP_TILE_PX - 1 ? MAP_TILE_PX - 1 : x0 + 1;
+            const int ya = y0 < 0 ? 0 : y0, yb = y0 + 1 > MAP_TILE_PX - 1 ? MAP_TILE_PX - 1 : y0 + 1;
+            const int p00 = lum[ya * MAP_TILE_PX + xa], p10 = lum[ya * MAP_TILE_PX + xb];
+            const int p01 = lum[yb * MAP_TILE_PX + xa], p11 = lum[yb * MAP_TILE_PX + xb];
+            const int top = p00 * (256 - ax) + p10 * ax, bot = p01 * (256 - ax) + p11 * ax;
+            row[x] = (uint8_t)((top * (256 - ay) + bot * ay) >> 16);
         }
     }
     s_ready = true;
@@ -178,6 +207,7 @@ void map_bg_ui_tick(int mode) {
     bool fresh = false;
     if (s_ready) {
         memcpy(s_front, s_back, NPIX);
+        s_frontSrc = s_backSrc;
         s_ready = false;
         s_haveFront = true;
         fresh = true;
@@ -188,13 +218,19 @@ void map_bg_ui_tick(int mode) {
     s_lastTheme = theme;
     const uint32_t tint = theme_tint(theme);
     if (mode <= 0 || !tint || !s_haveFront) { radar::setMap(nullptr); return; }
-    // CARTO dark_all: Hintergrund ~#0e0e0e, Straßen grau, Beschriftung hell. Den Grund schwarz
-    // lassen, den Rest strecken und in der Designfarbe einfärben ("dunkel" / "hell").
+    // CARTO dark_all: Hintergrund ~#0e0e0e, Straßen grau, Beschriftung hell -> den Grund
+    // schwarz lassen, den Rest strecken.
+    // OSM-Standard ist hell: Land ~#f2efe9 (Helligkeit ~240), Straßen weiß mit grauem Rand,
+    // Hauptstraßen farbig, Wasser/Wald mittelhell, Schrift dunkel. Dunkel wird es über den
+    // ABSTAND zur Landfarbe: der Grund wird schwarz, alles, was sich abhebt (Straßenränder,
+    // farbige Straßen, Wasser, Wald, Schrift), leuchtet -- Schrift am hellsten.
+    // Danach in der Designfarbe einfärben ("dunkel" / "hell").
+    const bool osm = (s_frontSrc == MAP_SRC_OSM);
     const int gain = (mode >= 2) ? 230 : 130;      // /256 nach der Streckung
     const int tr = (tint >> 16) & 0xFF, tg = (tint >> 8) & 0xFF, tb = tint & 0xFF;
     uint16_t lut[256];
     for (int l = 0; l < 256; ++l) {
-        int v = (l - 16) * 2;
+        int v = osm ? (abs(l - 240) - 6) * 2 : (l - 16) * 2;
         if (v < 0) v = 0;
         if (v > 255) v = 255;
         v = v * gain / 256;
