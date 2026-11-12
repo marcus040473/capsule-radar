@@ -72,7 +72,7 @@ static uint32_t              g_idleDimMs = IDLE_DIM_MS;              // dim afte
 static bool                  g_fdSleep = true;                       // face-down sleep (screen off) on/off (web/NVS)
 static bool                  g_clockOn = true;                       // idle clock instead of the idle dim (web/NVS)
 static bool                  g_showSweep = true;                     // rotating sweep line on/off (web/NVS)
-static int                   g_units = 0;                            // 0=Aviation 1=Metric 2=Imperial (web/NVS)
+static int                   g_units = 1;                            // 0=Aviation 1=Metric 2=Imperial (web/NVS); DE: metric by default
 static int                   g_tempUnit = 0;                         // weather temp: 0=follow Units 1=°C 2=°F (web/NVS)
 static bool                  g_showAirports = true;                  // airport markers on/off (web/NVS)
 static bool                  g_hideGround   = false;                 // skip on-ground aircraft in the feed (web/NVS)
@@ -325,7 +325,7 @@ static void loadSettings() {
     g_idleDimMs        = p.getUInt("idledim", IDLE_DIM_MS);
     g_fdSleep          = p.getBool("fdsleep", true);
     g_clockOn          = p.getBool("clock", true);
-    g_units            = p.getInt("units", 0);
+    g_units            = p.getInt("units", 1);   // DE: km, m, km/h unless chosen otherwise
     g_tempUnit         = p.getInt("tempu", 0);
     g_tz               = p.getString("tz", TZ_STR);
     g_bigText          = p.getBool("bigtext", false);
