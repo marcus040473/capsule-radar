@@ -171,8 +171,38 @@ struct AcDraw {
 static std::vector<AcDraw> s_acs;
 static std::map<std::string, std::vector<lv_point_t>> s_trails;
 
-static const float GX[4] = { 0.0f,  7.0f, 0.0f, -7.0f };
-static const float GY[4] = { -11.0f, 5.0f, 8.0f, 5.0f };
+// Aircraft glyph: a small airplane seen from above, nose up (rotated by track). LVGL 8
+// fills convex polygons only, so the silhouette is three convex parts: fuselage, swept
+// wings, tailplane. Units are pixels at scale 1.
+struct GlyphPart { int n; float x[6], y[6]; };
+static const GlyphPart GLYPH[3] = {
+    { 5, { 0.0f,  2.2f,  2.2f, -2.2f, -2.2f },          { -12.0f, -8.5f, 10.0f, 10.0f, -8.5f } },   // fuselage
+    { 6, { -2.0f, 2.0f, 12.0f, 12.0f, -12.0f, -12.0f }, { -4.0f, -4.0f,  2.5f,  4.5f,   4.5f,   2.5f } }, // wings
+    { 6, { -1.5f, 1.5f,  5.5f,  5.5f, -5.5f, -5.5f },   {  6.0f,  6.0f,  9.5f, 11.0f,  11.0f,   9.5f } }, // tail
+};
+
+static void draw_plane(lv_draw_ctx_t *d, lv_point_t pos, float trackDeg, lv_color_t col,
+                       lv_opa_t opa, float scale) {
+    const float th = trackDeg * (float)M_PI / 180.0f;
+    const float c = cosf(th), s = sinf(th);
+    lv_draw_rect_dsc_t g;
+    lv_draw_rect_dsc_init(&g);
+    // dark outline first (the parts drawn a little bigger), so the plane reads on the map
+    for (int pass = 0; pass < 2; ++pass) {
+        const float k = scale * (pass == 0 ? 1.28f : 1.0f);
+        g.bg_color = pass == 0 ? lv_color_black() : col;
+        g.bg_opa = pass == 0 ? (lv_opa_t)(opa * 170 / 255) : opa;
+        for (const GlyphPart &part : GLYPH) {
+            lv_point_t pts[6];
+            for (int i = 0; i < part.n; ++i) {
+                const float x = part.x[i] * k, y = part.y[i] * k;
+                pts[i].x = (lv_coord_t)(pos.x + (lv_coord_t)lroundf(x * c - y * s));
+                pts[i].y = (lv_coord_t)(pos.y + (lv_coord_t)lroundf(x * s + y * c));
+            }
+            lv_draw_polygon(d, &g, pts, (uint16_t)part.n);
+        }
+    }
+}
 
 static inline bool orb() { return s_theme == THEME_ORB; }
 // The second hand's colour. Orb has no sweep and a green lead on a green scope: orange there.
@@ -604,20 +634,9 @@ static void ac_draw_cb(lv_event_t *e) {
             }
         } else {
             draw_trail(d, ac, ac.color);
-            const float th = ((ac.track != ac.track) ? 0.0f : ac.track) * (float)M_PI / 180.0f;
-            const float c = cosf(th), s = sinf(th);
-            lv_point_t pts[4];
-            for (int i = 0; i < 4; ++i) {
-                const float x = GX[i] * c - GY[i] * s;
-                const float y = GX[i] * s + GY[i] * c;
-                pts[i].x = (lv_coord_t)(ac.pos.x + (lv_coord_t)lroundf(x));
-                pts[i].y = (lv_coord_t)(ac.pos.y + (lv_coord_t)lroundf(y));
-            }
-            lv_draw_rect_dsc_t g;
-            lv_draw_rect_dsc_init(&g);
-            g.bg_color = ac.emergency ? COL_EMERG_CORE : ac.color;   // white core, see define
-            g.bg_opa = dim(LV_OPA_COVER);
-            lv_draw_polygon(d, &g, pts, 4);
+            const float trk = (ac.track != ac.track) ? 0.0f : ac.track;
+            draw_plane(d, ac.pos, trk, ac.emergency ? COL_EMERG_CORE : ac.color,   // white core, see define
+                       dim(LV_OPA_COVER), s_bigText ? 1.15f : 1.0f);
             if (ac.emergency) {
                 lv_draw_arc_dsc_t h;
                 lv_draw_arc_dsc_init(&h);
