@@ -91,6 +91,13 @@ static long day_number(int y, int m, int d) {
 
 const char *quote_for_date(int year, int month, int day, char *title, size_t titleLen) {
     const long n = day_number(year, month, day);
+#if defined(UI_BIRTHDAY_MONTH) && defined(UI_BIRTHDAY_DAY)
+    if (month == UI_BIRTHDAY_MONTH && day == UI_BIRTHDAY_DAY) {
+        snprintf(title, titleLen, "Alles Gute zum Geburtstag, %s!", UI_RECIPIENT_NAME);
+        return "Heute ist dein Tag! Ich wünsche dir ein Jahr voller Lachen, Abenteuer und "
+               "Rückenwind - und dass alle deine Träume abheben. Schön, dass es dich gibt.";
+    }
+#endif
     if (month == 12 && day == 24) {
         snprintf(title, titleLen, "Frohe Weihnachten, %s!", UI_RECIPIENT_NAME);
         return "Heute ist Heiligabend. Ich wünsche dir Liebe, Wärme und ganz viel Glück - "

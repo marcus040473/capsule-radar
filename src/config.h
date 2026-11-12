@@ -12,6 +12,8 @@
 #define SETUP_AP_NAME     "LisasRadar-Setup"
 // Für Grüße und den Spruch des Tages.
 #define UI_RECIPIENT_NAME "Lisa"
+#define UI_BIRTHDAY_MONTH 2     // Geburtstag (25.02.): an diesem Tag ein Geburtstagsgruß statt des Spruchs
+#define UI_BIRTHDAY_DAY   25
 // Name des Geräts auf Webseite, Update-Seite, WLAN-Portal und Statistik-Seite.
 #define UI_APP_NAME       "Lisas Flug- & Wetterradar"
 // Name auf dem Startbild (zwei Zeilen, damit er auf das runde Display passt).
