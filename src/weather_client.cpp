@@ -1,5 +1,6 @@
 #include "weather_client.h"
 #include "config.h"
+#include "dwd_client.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -8,7 +9,16 @@
 #include <stdio.h>
 #include <string.h>
 
+static bool openmeteo_fetch(double lat, double lon, WeatherSnapshot &out);
+
+// Deutscher Wetterdienst first (forecast of the nearest MOSMIX station + measured values),
+// Open-Meteo when there is no DWD station nearby or the DWD does not answer.
 bool weather_fetch(double lat, double lon, WeatherSnapshot &out) {
+    if (dwd_weather_fetch(lat, lon, out)) return true;
+    return openmeteo_fetch(lat, lon, out);
+}
+
+static bool openmeteo_fetch(double lat, double lon, WeatherSnapshot &out) {
     if (WiFi.status() != WL_CONNECTED) return false;
 
     char url[512];

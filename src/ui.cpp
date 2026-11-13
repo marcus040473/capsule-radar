@@ -55,6 +55,7 @@ static lv_obj_t *s_weatherTitle = nullptr;
 enum WeatherViewMode { WEATHER_RADAR, WEATHER_CLOUDS, WEATHER_FORECAST };
 static WeatherViewMode s_weatherMode = WEATHER_RADAR;
 static lv_obj_t *s_fcCurrent = nullptr, *s_fcCondition = nullptr, *s_fcUpdated = nullptr;
+static lv_obj_t *s_fcWarn = nullptr;   // DWD-Warnung (Pille über "STAND"), nur in der Vorhersage
 static lv_obj_t *s_fcMetricName[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_fcMetricValue[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_fcDay[3] = { nullptr, nullptr, nullptr };
@@ -782,7 +783,7 @@ static void build_weather(void) {
         char wind[28]; snprintf(wind, sizeof(wind), "%s %.0f %s", cardinal((float)w.windDeg),
                                 weather_wind(w.windKmh), weather_wind_unit());
         lv_label_set_text(s_fcMetricValue[2], wind);
-        char updated[24]; snprintf(updated, sizeof(updated), "STAND %s", w.updated);
+        char updated[32]; snprintf(updated, sizeof(updated), w.source[0] ? "STAND %s  |  %s" : "STAND %s", w.updated, w.source);
         lv_label_set_text(s_fcUpdated, updated);
 
         for (int col = 0; col < 3; ++col) {
@@ -841,8 +842,10 @@ static void build_weather(void) {
         char stamp[6] = "--:--";
         time_t ft = (time_t)frameTime; struct tm ti;
         if (frameTime && localtime_r(&ft, &ti)) snprintf(stamp, sizeof(stamp), "%02d:%02d", ti.tm_hour, ti.tm_min);
-        char attr[64];
-        snprintf(attr, sizeof(attr), cloudMode ? "SAT %s  |  EUMETSAT" : "RADAR %s  |  RAINVIEWER", stamp);
+        char attr[64], src[12];
+        wx_radar_source(src, sizeof(src));
+        if (cloudMode) snprintf(attr, sizeof(attr), "SAT %s  |  EUMETSAT", stamp);
+        else snprintf(attr, sizeof(attr), "RADAR %s  |  %s", stamp, src);
         lv_label_set_text(s_wxAttrib, attr);
     } else {
         if (s_wxCanvas) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
@@ -871,6 +874,38 @@ static void build_weather(void) {
     }
     if (!forecastMode && haveImage) lv_obj_add_flag(s_wxStatus, LV_OBJ_FLAG_HIDDEN);
     if (!forecastMode && !haveImage) lv_obj_add_flag(s_wxCanvas, LV_OBJ_FLAG_HIDDEN);
+    if (s_fcWarn) {   // amtliche DWD-Warnung für den Standort
+        WeatherWarnings wn;
+        weather_warn_get(wn);
+        if (forecastMode && wn.count > 0) {
+            const WeatherWarning &it = wn.items[0];
+            char until[24] = "";
+            if (it.expires > 0) {
+                static const char *WD[7] = { "So", "Mo", "Di", "Mi", "Do", "Fr", "Sa" };
+                time_t ex = (time_t)it.expires, now = time(nullptr);
+                struct tm te, tn;
+                localtime_r(&ex, &te);
+                localtime_r(&now, &tn);
+                if (te.tm_yday == tn.tm_yday && te.tm_year == tn.tm_year)
+                    snprintf(until, sizeof(until), "  bis %02d:%02d", te.tm_hour, te.tm_min);
+                else
+                    snprintf(until, sizeof(until), "  bis %s %02d:%02d", WD[te.tm_wday], te.tm_hour, te.tm_min);
+            }
+            char txt[96];
+            snprintf(txt, sizeof(txt), LV_SYMBOL_WARNING " %s%s%s%s", it.preliminary ? "VORAB: " : "",
+                     it.event, until, wn.count > 1 ? "  +" : "");
+            if (wn.count > 1) {
+                const size_t l = strlen(txt);
+                snprintf(txt + l, sizeof(txt) - l, "%d", wn.count - 1);
+            }
+            lv_label_set_text(s_fcWarn, txt);
+            lv_obj_set_style_bg_color(s_fcWarn, lv_color_hex(weather_warn_color(it.level)), 0);
+            lv_obj_set_style_text_color(s_fcWarn, it.level >= 3 ? lv_color_white() : lv_color_black(), 0);
+            lv_obj_clear_flag(s_fcWarn, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_fcWarn, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     lv_label_set_text(s_wxRange, cloudMode ? "200 KM" : "75 KM");
     lv_label_set_text(s_weatherModeLbl,
         s_weatherMode == WEATHER_RADAR ? "WOLKEN" :
@@ -1900,7 +1935,7 @@ static void toast_close(void) {
     if (s_toast) { lv_obj_del_async(s_toast); s_toast = nullptr; }   // async: may run inside its own click
 }
 
-void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex) {
+void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex, uint32_t accent) {
     toast_close();
     snprintf(s_toastHex, sizeof(s_toastHex), "%s", hex ? hex : "");
     s_toast = lv_obj_create(lv_layer_top());
@@ -1910,8 +1945,8 @@ void ui_show_toast(const char *title, const char *text, uint32_t ms, const char 
     lv_obj_align(s_toast, LV_ALIGN_TOP_MID, 0, s_bigText ? 130 : 124);
     lv_obj_set_style_bg_color(s_toast, UI_PANEL, 0);
     lv_obj_set_style_bg_opa(s_toast, 240, 0);
-    lv_obj_set_style_border_color(s_toast, UI_GREEN, 0);
-    lv_obj_set_style_border_width(s_toast, 2, 0);
+    lv_obj_set_style_border_color(s_toast, accent ? lv_color_hex(accent) : UI_GREEN, 0);
+    lv_obj_set_style_border_width(s_toast, accent ? 3 : 2, 0);
     lv_obj_set_style_radius(s_toast, 14, 0);
     lv_obj_set_style_pad_all(s_toast, 10, 0);
     lv_obj_set_style_pad_row(s_toast, 4, 0);
@@ -1928,7 +1963,7 @@ void ui_show_toast(const char *title, const char *text, uint32_t ms, const char 
     }, LV_EVENT_CLICKED, NULL);
     lv_obj_t *t = lv_label_create(s_toast);
     lv_obj_set_style_text_font(t, F16(), 0);
-    lv_obj_set_style_text_color(t, UI_GREEN, 0);
+    lv_obj_set_style_text_color(t, accent ? lv_color_hex(accent) : UI_GREEN, 0);
     lv_label_set_text(t, title ? title : "");
     lv_obj_t *m = lv_label_create(s_toast);
     lv_obj_set_width(m, lv_pct(100));
@@ -2503,7 +2538,16 @@ void ui_create(void) {
     lv_obj_set_style_text_font(s_fcUpdated, F12(), 0);
     lv_obj_set_style_text_color(s_fcUpdated, UI_DIM, 0);
     lv_label_set_text(s_fcUpdated, "");
-    lv_obj_align(s_fcUpdated, LV_ALIGN_TOP_MID, 0, 365);
+    lv_obj_align(s_fcUpdated, LV_ALIGN_TOP_MID, 0, s_bigText ? 380 : 372);
+    s_fcWarn = lv_label_create(wp);
+    lv_obj_set_style_text_font(s_fcWarn, F12(), 0);
+    lv_obj_set_style_bg_opa(s_fcWarn, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_fcWarn, 9, 0);
+    lv_obj_set_style_pad_hor(s_fcWarn, 10, 0);
+    lv_obj_set_style_pad_ver(s_fcWarn, 2, 0);
+    lv_label_set_text(s_fcWarn, "");
+    lv_obj_align(s_fcWarn, LV_ALIGN_TOP_MID, 0, s_bigText ? 351 : 343);
+    lv_obj_add_flag(s_fcWarn, LV_OBJ_FLAG_HIDDEN);
 
     s_weatherModeBtn = lv_btn_create(wp);
     lv_obj_set_size(s_weatherModeBtn, 164, 34);

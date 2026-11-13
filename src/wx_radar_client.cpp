@@ -2,6 +2,9 @@
 #include "wx_radar.h"
 #include "net_fetch.h"
 #include "config.h"
+#include "dwd_client.h"
+#include <math.h>
+#include <time.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -15,6 +18,11 @@ static uint32_t s_decodedPixels = 0;
 static uint32_t s_sourcePixels = 0;
 static int s_minX = WX_RADAR_SOURCE_SIZE, s_minY = WX_RADAR_SOURCE_SIZE;
 static int s_maxX = -1, s_maxY = -1;
+// DWD radar PNGs (palette + transparency): outside the radar network the image is a
+// translucent grey veil with a magenta border -- both are dropped, and if the centre (the
+// user's spot) is under the veil the DWD has no coverage there and RainViewer is used instead.
+static bool s_dwdMode = false;
+static bool s_centerNoData = false;
 
 static bool ensure_decoder(void) {
     if (s_png) return true;
@@ -30,7 +38,18 @@ static int radar_png_line(PNGDRAW *draw) {
     const int crop = (WX_RADAR_SOURCE_SIZE - WX_RADAR_SIZE) / 2;
     if (!dst) return 1;
     uint16_t line[WX_RADAR_SOURCE_SIZE];
-    if (draw->iPixelType == PNG_PIXEL_TRUECOLOR_ALPHA && draw->iBpp == 8) {
+    if (s_dwdMode && draw->iPixelType == PNG_PIXEL_INDEXED && draw->iBpp == 8 && draw->pPalette) {
+        const uint8_t *pal = draw->pPalette;
+        for (int x = 0; x < draw->iWidth && x < WX_RADAR_SOURCE_SIZE; ++x) {
+            const uint8_t i = draw->pPixels[x];
+            const uint8_t r = pal[i * 3], g = pal[i * 3 + 1], b = pal[i * 3 + 2];
+            const uint8_t a = draw->iHasAlpha ? pal[768 + i] : 255;
+            const bool veil = a < 160 || (r > 200 && g < 60 && b > 200);   // no-data grey / border
+            if (draw->y == WX_RADAR_SOURCE_SIZE / 2 && x == WX_RADAR_SOURCE_SIZE / 2)
+                s_centerNoData = a > 20 && a < 160 && abs(r - g) < 12 && abs(g - b) < 12;
+            line[x] = veil ? 0 : (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        }
+    } else if (draw->iPixelType == PNG_PIXEL_TRUECOLOR_ALPHA && draw->iBpp == 8) {
         const uint8_t *src = draw->pPixels;
         for (int x = 0; x < draw->iWidth; ++x, src += 4) {
             line[x] = (uint16_t)((src[2] >> 3) | ((src[1] >> 2) << 5) |
@@ -87,8 +106,50 @@ static bool https_get_string(const char *url, String &body, int timeoutMs) {
     return body.length() > 0;
 }
 
+static bool decode_and_commit(uint8_t *image, size_t imageLen, uint32_t frameTime, double lat, double lon);
+
+// Deutscher Wetterdienst: dwd:Niederschlagsradar (RV-Produkt, 1 km, alle 5 Minuten) als WMS-Bild
+// in genau der Geometrie der RainViewer-Kachel (Web-Mercator, Zoom 7 bei 512 px), damit Ringe
+// und km-Angaben gleich bleiben.
+static bool dwd_radar_fetch(double lat, double lon) {
+    const time_t now = time(nullptr);
+    if (now < 1700000000L) return false;
+    const double R = 6378137.0, res = 2.0 * M_PI * R / 65536.0, half = 256.0 * res;
+    const double x = R * lon * M_PI / 180.0;
+    const double y = R * log(tan(M_PI / 4.0 + lat * M_PI / 360.0));
+    for (int back = 1; back <= 3; ++back) {           // the newest 5-minute frame that exists
+        const time_t ft = (now / 300) * 300 - back * 300;
+        struct tm g;
+        gmtime_r(&ft, &g);
+        char url[420];
+        snprintf(url, sizeof(url),
+                 "https://maps.dwd.de/geoserver/dwd/wms?service=WMS&version=1.1.1&request=GetMap"
+                 "&layers=dwd:Niederschlagsradar&styles=&srs=EPSG:3857&bbox=%.1f,%.1f,%.1f,%.1f"
+                 "&width=%d&height=%d&format=image/png&transparent=true"
+                 "&time=%04d-%02d-%02dT%02d:%02d:00.000Z",
+                 x - half, y - half, x + half, y + half, WX_RADAR_SOURCE_SIZE, WX_RADAR_SOURCE_SIZE,
+                 g.tm_year + 1900, g.tm_mon + 1, g.tm_mday, g.tm_hour, g.tm_min);
+        uint8_t *image = nullptr; size_t imageLen = 0;
+        if (!net_fetch_psram(url, ADSB_USER_AGENT, &image, &imageLen, 260000, 3500, 8500)) return false;
+        if (imageLen < 8 || image[0] != 0x89 || image[1] != 'P') {   // service exception (XML): frame not there yet
+            heap_caps_free(image);
+            continue;
+        }
+        s_dwdMode = true;
+        s_centerNoData = false;
+        const bool ok = decode_and_commit(image, imageLen, (uint32_t)ft, lat, lon);
+        s_dwdMode = false;
+        return ok;
+    }
+    return false;
+}
+
 bool wx_radar_fetch(double lat, double lon) {
     if (WiFi.status() != WL_CONNECTED || !wx_radar_back_buffer() || !ensure_decoder()) return false;
+    if (dwd_in_germany(lat, lon)) {
+        if (dwd_radar_fetch(lat, lon)) return true;
+        Serial.println("[wxradar] DWD radar unavailable here -> RainViewer");
+    }
 
     String meta;
     if (!https_get_string("https://api.rainviewer.com/public/weather-maps.json", meta, 6500)) {
@@ -112,6 +173,11 @@ bool wx_radar_fetch(double lat, double lon) {
     if (!net_fetch_psram(url, ADSB_USER_AGENT, &image, &imageLen, 260000, 3500, 8500)) {
         Serial.println("[wxradar] tile fetch failed"); return false;
     }
+    return decode_and_commit(image, imageLen, frameTime, lat, lon);
+}
+
+// Decode a 512 px PNG (freed here) into the back buffer and publish it.
+static bool decode_and_commit(uint8_t *image, size_t imageLen, uint32_t frameTime, double lat, double lon) {
     memset(wx_radar_back_buffer(), 0, WX_RADAR_SIZE * WX_RADAR_SIZE * sizeof(uint16_t));
     s_decodedPixels = 0;
     s_sourcePixels = 0;
@@ -136,6 +202,11 @@ bool wx_radar_fetch(double lat, double lon) {
     if (s_decodedPixels == 0) {
         Serial.println("[wxradar] decoded tile is empty (0 coloured pixels)");
     }
+    if (s_dwdMode && s_centerNoData) {                // no DWD coverage at this spot
+        Serial.println("[wxradar] DWD: no radar coverage at the centre");
+        return false;
+    }
+    wx_radar_set_source(s_dwdMode ? "DWD" : "RAINVIEWER");
     wx_radar_commit(frameTime, lat, lon);
     Serial.printf("[wxradar] frame %lu updated (%u bytes, source=%lu bbox=%d,%d-%d,%d crop=%lu)\n",
                   (unsigned long)frameTime, (unsigned)imageLen,

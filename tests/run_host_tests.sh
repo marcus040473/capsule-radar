@@ -53,6 +53,7 @@ fi
 
 run facedown_sleep -Isrc tests/facedown_sleep_test.cpp
 run sky -Isrc tests/sky_test.cpp
+run dwd -Isrc tests/dwd_test.cpp src/dwd_mosmix.cpp src/weather.cpp
 
 printf '\n%s\n' "$([ $rc -eq 0 ] && echo 'ALL HOST TESTS PASSED' || echo 'HOST TESTS FAILED')"
 exit $rc

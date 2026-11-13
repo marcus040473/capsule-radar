@@ -18,6 +18,7 @@
 #include "map_client.h"               // its tile downloads (core 0)
 #include "quotes.h"                   // Spruch des Tages
 #include "sky.h"                      // ISS: sun and satellite elevation
+#include "dwd_client.h"               // Deutscher Wetterdienst: Warnungen, Gebietsprüfung
 #include "net_fetch.h"                // ISS position (small JSON)
 #include <ArduinoJson.h>
 #include "user_photo.h"               // own photo for the photo page (LittleFS + PSRAM)
@@ -124,6 +125,7 @@ static bool                  g_updateBlocked = false;                // /update:
 static bool                  g_updateDone = false;                   // /update: Update.end() succeeded -> the completion handler may reboot
 static String                g_tz = TZ_STR;                          // POSIX timezone (web-configurable, NVS); applied via configTzTime
 static volatile bool         g_weatherDirty = false;
+static volatile bool         g_warnDirty = false;                    // new DWD warnings stored (core 0 -> 1)
 static volatile bool         g_wxRadarDirty = false;
 static volatile bool         g_cloudImageDirty = false;
 
@@ -164,6 +166,7 @@ static void adsb_task(void*) {
     bool wasConnected = false;
     uint32_t lastPoll = 0;
     uint32_t nextWeatherAt = UINT32_MAX;       // armed five seconds after WiFi connects
+    uint32_t nextWarnAt = UINT32_MAX;          // DWD warnings (Germany only), armed with the weather
     uint32_t nextWxRadarAt = UINT32_MAX;
     uint32_t nextCloudImageAt = UINT32_MAX;
     FeedWatchdog watchdog(millis());         // self-heal: see feed_watchdog.h
@@ -180,6 +183,7 @@ static void adsb_task(void*) {
             configTzTime(g_tz.c_str(), "pool.ntp.org", "time.nist.gov");  // local time (web-configurable TZ)
             Serial.println("[web] config: http://" DEVICE_HOSTNAME ".local/  (or the IP above)");
             nextWeatherAt = millis() + 5000UL; // let the first ADS-B poll complete before weather TLS
+            nextWarnAt = millis() + 15000UL;
             nextCloudImageAt = millis() + 15000UL;
             nextWxRadarAt = millis() + 12000UL;
             // mDNS + OTA are started on core 1 (loop) to keep all mDNS use on one core
@@ -280,6 +284,23 @@ static void adsb_task(void*) {
                 } else {
                     nextWeatherAt = millis() + 60000UL;
                     Serial.println("[weather] fetch failed; retrying in 60s");
+                }
+            }
+            // Amtliche Warnungen des DWD für den Standort (nur in Deutschland)
+            if ((int32_t)(nowMs - nextWarnAt) >= 0) {
+                if (!dwd_in_germany(g_settings.homeLat, g_settings.homeLon)) {
+                    nextWarnAt = millis() + DWD_WARN_REFRESH_MS;
+                } else {
+                    WeatherWarnings wn;
+                    if (dwd_warnings_fetch(g_settings.homeLat, g_settings.homeLon, wn)) {
+                        weather_warn_store(wn);
+                        g_warnDirty = true;
+                        nextWarnAt = millis() + DWD_WARN_REFRESH_MS;
+                        Serial.printf("[dwd] %d warning(s)%s%s\n", wn.count, wn.count ? ": " : "",
+                                      wn.count ? wn.items[0].headline : "");
+                    } else {
+                        nextWarnAt = millis() + 120000UL;
+                    }
                 }
             }
             if ((int32_t)(nowMs - nextWxRadarAt) >= 0) {
@@ -667,6 +688,38 @@ static void issTick() {                              // core 1 (loop)
              sky::compassWord(g_issBearing), (int)lroundf(g_issElev));
     ui_show_toast("ISS sichtbar!", text, 30000, "");
     Serial.printf("[iss] visible: %.0f deg elevation, bearing %.0f\n", (double)g_issElev, (double)g_issBearing);
+}
+
+// ---- Amtliche Warnungen (DWD): ein Hinweis, sobald eine neue Warnung für den Standort gilt ----
+static void warnTick() {                             // core 1
+    static uint32_t seen[8] = {};
+    static int seenN = 0;
+    WeatherWarnings wn;
+    if (!weather_warn_get(wn)) return;
+    uint32_t now[3];
+    for (int i = 0; i < wn.count; ++i) {
+        const WeatherWarning &it = wn.items[i];
+        uint32_t h = 2166136261u;                    // FNV-1a over event + level + onset
+        for (const char *p = it.event; *p; ++p) h = (h ^ (uint8_t)*p) * 16777619u;
+        h = (h ^ (uint32_t)it.level) * 16777619u;
+        h = (h ^ (uint32_t)it.onset) * 16777619u;
+        now[i] = h;
+        bool known = false;
+        for (int k = 0; k < seenN; ++k) known |= seen[k] == h;
+        if (known || it.preliminary) continue;
+        char text[120];
+        time_t ex = (time_t)it.expires;
+        struct tm te;
+        if (it.expires > 0 && localtime_r(&ex, &te))
+            snprintf(text, sizeof(text), "%s\ngilt bis %02d:%02d Uhr", it.headline, te.tm_hour, te.tm_min);
+        else
+            snprintf(text, sizeof(text), "%s", it.headline);
+        ui_show_toast("Wetterwarnung (DWD)", text, 30000, "", weather_warn_color(it.level));
+        Serial.printf("[dwd] new warning: %s\n", it.headline);
+        break;                                       // one hint at a time; the page lists the rest
+    }
+    seenN = wn.count;
+    for (int i = 0; i < wn.count; ++i) seen[i] = now[i];
 }
 
 // ---- Flugzeug verfolgen (das Auge auf der Detailkarte) ----
@@ -2204,6 +2257,11 @@ void loop() {
     if (g_weatherDirty) {
         g_weatherDirty = false;
         ui_on_data_updated();
+    }
+    if (g_warnDirty) {                         // DWD warnings: page + a hint for each new one
+        g_warnDirty = false;
+        ui_on_data_updated();
+        warnTick();
     }
     if (g_wxRadarDirty) {
         g_wxRadarDirty = false;

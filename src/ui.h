@@ -64,7 +64,8 @@ void ui_show_message(const char *title, const char *text, void (*onOk)(void));
 bool ui_message_up(void);
 // Kurzer Hinweis oben auf dem Bildschirm ("Gerade über dir", "ISS sichtbar"), verschwindet nach
 // ms von selbst. hex != "": ein Tipp darauf zeigt dieses Flugzeug auf dem Radar.
-void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex);
+void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex,
+                   uint32_t accent = 0);   // accent 0xRRGGBB for border + title (0 = green)
 // Tagesrekorde für die Statistik-Seite (Tipp auf die Seite: Jetzt <-> Heute).
 // ISS-Seite (ganz rechts, nach dem Wetter): stark herausgezoomtes Radar mit der ISS.
 void ui_set_iss_home(double lat, double lon);                       // Mittelpunkt (eigener Standort)

@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de14"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de15"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
@@ -77,6 +77,12 @@ static const float WEB_RANGE_KM[]   = {10.0f, 15.0f, 25.0f, 30.0f, 50.0f, 100.0f
 // ---------- Weather forecast (Open-Meteo, no API key) ----------
 #define WEATHER_REFRESH_MS  1800000UL      // 30 minutes; forecast data changes slowly
 #define WX_RADAR_REFRESH_MS 300000UL       // RainViewer frames update about every 5 minutes
+// DWD (Deutscher Wetterdienst) Open Data: Vorhersage von der nächsten MOSMIX-Station (höchstens
+// DWD_STATION_MAX_KM entfernt, sonst Open-Meteo), Messwerte von der nächsten Station mit
+// stündlichen Beobachtungen (höchstens DWD_OBS_MAX_KM), Warnungen alle DWD_WARN_REFRESH_MS.
+#define DWD_STATION_MAX_KM  60.0
+#define DWD_OBS_MAX_KM      30.0
+#define DWD_WARN_REFRESH_MS (10UL * 60UL * 1000UL)
 #define CLOUD_IMAGE_REFRESH_MS 600000UL    // EUMETSAT MTG cloud imagery; cache for 10 minutes
 
 // ---------- Screen geometry (AMOLED defaults; LCD 2.1 overrides below) ----------

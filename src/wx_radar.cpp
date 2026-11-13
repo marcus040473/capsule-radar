@@ -10,6 +10,19 @@ static std::mutex s_mutex;
 static uint16_t *s_front = nullptr, *s_back = nullptr;
 static uint32_t s_frameTime = 0, s_version = 0;
 static double s_lat = 0, s_lon = 0;
+static char s_pendingSrc[12] = "RAINVIEWER", s_src[12] = "RAINVIEWER";
+
+void wx_radar_set_source(const char *source) {
+    strncpy(s_pendingSrc, source ? source : "", sizeof(s_pendingSrc) - 1);
+    s_pendingSrc[sizeof(s_pendingSrc) - 1] = 0;
+}
+
+void wx_radar_source(char *buf, unsigned len) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    if (!len) return;
+    strncpy(buf, s_src, len - 1);
+    buf[len - 1] = 0;
+}
 
 static uint16_t *alloc_pixels(void) {
     const size_t bytes = WX_RADAR_SIZE * WX_RADAR_SIZE * sizeof(uint16_t);
@@ -36,6 +49,7 @@ void wx_radar_commit(uint32_t frameTime, double lat, double lon) {
     std::lock_guard<std::mutex> lock(s_mutex);
     uint16_t *old = s_front; s_front = s_back; s_back = old;
     s_frameTime = frameTime; s_lat = lat; s_lon = lon; ++s_version;
+    memcpy(s_src, s_pendingSrc, sizeof(s_src));
 }
 
 bool wx_radar_front(const uint16_t **pixels, uint32_t *frameTime,

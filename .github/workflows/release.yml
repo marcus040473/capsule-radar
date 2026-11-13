@@ -146,6 +146,8 @@ jobs:
             **Capsule Radar – deutsche Version.** Display, Konfigurationsseite und WLAN-Einrichtung auf Deutsch (mit Umlauten).
             **Am Gerät:** auf dem Radar nach rechts wischen = Einstellungen (Ton, Design, Bild drehen, WLAN an/aus, WLAN wählen/hinzufügen, QR-Code zur Webseite, Ausschalten …). **Karte unter dem Radar** (Einstellungen → Karte: Aus / Dunkel / Hell). Noch einmal wischen = Foto-Seite – das Foto auf der Webseite `lisasradar.local` hochladen. Ganz rechts, hinter dem Wetter: die **ISS-Seite** (wo die Raumstation gerade ist, mit Bahn und Sichtkreis).
 
+            **Wetter vom DWD:** Vorhersage und Messwerte vom Deutschen Wetterdienst, in Deutschland das DWD-Regenradar (1 km, alle 5 Minuten) und amtliche Unwetterwarnungen für den Standort.
+
             **Handy-App (Android):** `LisasRadar.apk` aufs Handy laden und öffnen (einmal „Apps aus unbekannten Quellen“ erlauben). Die App findet das Radar im WLAN, zeigt die Einstellungen und schickt mit einem Knopf den Standort des Handys ans Radar.
 
             Es werden drei Boards unterstützt. Die Datei muss zu Ihrem Board passen:

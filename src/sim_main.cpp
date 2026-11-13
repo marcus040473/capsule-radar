@@ -10,6 +10,7 @@
 #include <SDL.h>
 #include <lvgl.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdbool.h>
 #include <string.h>
 #include "config.h"
@@ -330,7 +331,19 @@ int main(int argc, char **argv) {
         forecast.days[i].code = codes[i]; forecast.days[i].tempMinC = lows[i];
         forecast.days[i].tempMaxC = highs[i]; forecast.days[i].rainChance = rain[i];
     }
+    snprintf(forecast.source, sizeof(forecast.source), "DWD");
     weather_store(forecast);
+    if (!getenv("NOWARN")) {   // mock DWD warning (orange): the forecast page shows a pill
+        WeatherWarnings wn = {};
+        wn.valid = true; wn.count = 2;
+        snprintf(wn.items[0].event, sizeof(wn.items[0].event), "STURMB\xC3\x96" "EN");
+        snprintf(wn.items[0].headline, sizeof(wn.items[0].headline), "Amtliche WARNUNG vor STURMB\xC3\x96" "EN");
+        wn.items[0].level = 2; wn.items[0].expires = (long)time(nullptr) + 6 * 3600;
+        snprintf(wn.items[1].event, sizeof(wn.items[1].event), "FROST");
+        wn.items[1].level = 1;
+        weather_warn_store(wn);
+        wx_radar_set_source("DWD");
+    }
     wx_radar_begin();
     if (uint16_t *wx = wx_radar_back_buffer()) {
         for (int y = 0; y < WX_RADAR_SIZE; ++y) for (int x = 0; x < WX_RADAR_SIZE; ++x) {

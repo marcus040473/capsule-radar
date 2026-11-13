@@ -17,6 +17,28 @@ bool weather_get(WeatherSnapshot &snapshot) {
     return snapshot.valid;
 }
 
+static WeatherWarnings s_warn = {};
+
+void weather_warn_store(const WeatherWarnings &w) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    s_warn = w;
+}
+
+bool weather_warn_get(WeatherWarnings &w) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    w = s_warn;
+    return w.valid;
+}
+
+unsigned weather_warn_color(int level) {
+    switch (level) {
+        case 4:  return 0xB04BD8;   // extrem: violett
+        case 3:  return 0xFF3B30;   // unwetter: rot
+        case 2:  return 0xFF9500;   // markant: orange
+        default: return 0xFFE14D;   // wetterwarnung/vorab: gelb
+    }
+}
+
 const char *weather_condition(int code) {
     if (code == 0) return "Klar";
     if (code <= 2) return "Teils bewölkt";

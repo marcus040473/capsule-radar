@@ -13,5 +13,8 @@
 void wx_radar_begin(void);
 uint16_t *wx_radar_back_buffer(void);                    // network/sim: decode here
 void wx_radar_commit(uint32_t frameTime, double lat, double lon);
+// who made the next committed frame ("DWD", "RAINVIEWER"); copied over in wx_radar_commit()
+void wx_radar_set_source(const char *source);
+void wx_radar_source(char *buf, unsigned len);            // the shown frame's source
 bool wx_radar_front(const uint16_t **pixels, uint32_t *frameTime,
                     double *lat, double *lon, uint32_t *version);
