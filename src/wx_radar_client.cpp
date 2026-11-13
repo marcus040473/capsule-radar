@@ -119,10 +119,13 @@ static bool decode_and_commit(uint8_t *image, size_t imageLen, uint32_t frameTim
 // Deutscher Wetterdienst: dwd:Niederschlagsradar (RV-Produkt, 1 km, alle 5 Minuten) als WMS-Bild
 // in genau der Geometrie der RainViewer-Kachel (Web-Mercator, Zoom 7 bei 512 px), damit Ringe
 // und km-Angaben gleich bleiben.
-static bool dwd_radar_fetch(double lat, double lon) {
+static bool dwd_radar_fetch(double lat, double lon, int ringKm) {
     const time_t now = time(nullptr);
     if (now < 1700000000L) return false;
-    const double R = 6378137.0, res = 2.0 * M_PI * R / 65536.0, half = 256.0 * res;
+    // The labelled ring sits 120 px from the centre of the 360 px crop: make that ringKm.
+    // Web-Mercator metres per pixel = ground metres per pixel / cos(latitude).
+    const double R = 6378137.0;
+    const double res = (ringKm * 1000.0 / 120.0) / cos(lat * M_PI / 180.0), half = 256.0 * res;
     const double x = R * lon * M_PI / 180.0;
     const double y = R * log(tan(M_PI / 4.0 + lat * M_PI / 360.0));
     for (int back = 1; back <= 3; ++back) {           // the newest 5-minute frame that exists
@@ -145,6 +148,7 @@ static bool dwd_radar_fetch(double lat, double lon) {
         }
         s_dwdMode = true;
         s_centerNoData = false;
+        wx_radar_set_ring_km((float)ringKm);
         const bool ok = decode_and_commit(image, imageLen, (uint32_t)ft, lat, lon);
         s_dwdMode = false;
         return ok;
@@ -152,10 +156,10 @@ static bool dwd_radar_fetch(double lat, double lon) {
     return false;
 }
 
-bool wx_radar_fetch(double lat, double lon) {
+bool wx_radar_fetch(double lat, double lon, int ringKm) {
     if (WiFi.status() != WL_CONNECTED || !wx_radar_back_buffer() || !ensure_decoder()) return false;
     if (dwd_point_in_germany(lat, lon)) {          // the DWD radar covers Germany (and a bit more)
-        if (dwd_radar_fetch(lat, lon)) return true;
+        if (dwd_radar_fetch(lat, lon, ringKm)) return true;
         Serial.println("[wxradar] DWD radar unavailable here -> RainViewer");
     }
 
@@ -173,8 +177,13 @@ bool wx_radar_fetch(double lat, double lon) {
     const uint32_t frameTime = latest["time"] | 0;
 
     char url[320];
-    snprintf(url, sizeof(url), "%s%s/512/7/%.5f/%.5f/2/1_1.png",
-             host, path, lat, lon);
+    // RainViewer: free tiles stop at zoom 7, so it can only zoom OUT (z6, z5) -- pick the
+    // level whose ring comes closest to the wish; the label then shows what it really is.
+    const double z7km = 120.0 * (2.0 * M_PI * 6378137.0 / 65536.0) * cos(lat * M_PI / 180.0) / 1000.0;
+    const int z = ringKm >= z7km * 3.0 ? 5 : (ringKm >= z7km * 1.5 ? 6 : 7);
+    wx_radar_set_ring_km((float)(z7km * (1 << (7 - z))));
+    snprintf(url, sizeof(url), "%s%s/512/%d/%.5f/%.5f/2/1_1.png",
+             host, path, z, lat, lon);
     // Stream the tile straight into PSRAM (net_fetch): a 512px PNG can be 100+ KB, and an
     // internal-heap String that big starves the live feed's TLS handshake.
     uint8_t *image = nullptr; size_t imageLen = 0;

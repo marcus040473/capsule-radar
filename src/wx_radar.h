@@ -16,5 +16,8 @@ void wx_radar_commit(uint32_t frameTime, double lat, double lon);
 // who made the next committed frame ("DWD", "RAINVIEWER"); copied over in wx_radar_commit()
 void wx_radar_set_source(const char *source);
 void wx_radar_source(char *buf, unsigned len);            // the shown frame's source
+// km of the labelled (middle) ring in the next committed frame / the shown frame
+void wx_radar_set_ring_km(float km);
+float wx_radar_ring_km(void);
 bool wx_radar_front(const uint16_t **pixels, uint32_t *frameTime,
                     double *lat, double *lon, uint32_t *version);

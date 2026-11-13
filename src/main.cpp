@@ -126,6 +126,10 @@ static bool                  g_updateDone = false;                   // /update:
 static String                g_tz = TZ_STR;                          // POSIX timezone (web-configurable, NVS); applied via configTzTime
 static volatile bool         g_weatherDirty = false;
 static volatile bool         g_warnDirty = false;                    // new DWD warnings stored (core 0 -> 1)
+static volatile int          g_wxKm = WX_ZOOM_DEFAULT_KM;            // Regenradar-Zoom (NVS "wxkm")
+static int                   g_battOff = BATT_OFF_DEFAULT;           // Bildschirm aus (Akku): Index (NVS "battoff")
+static bool                  g_battDark = false;                     // screen off by the battery saver
+static volatile bool         g_wxRefetch = false;                    // zoom changed: fetch the radar now
 static volatile bool         g_wxRadarDirty = false;
 static volatile bool         g_cloudImageDirty = false;
 
@@ -176,7 +180,7 @@ static void adsb_task(void*) {
         if (conn && !wasConnected) {
             // disable WiFi modem power-save: on a mains-powered desk gadget it just adds latency
             // and makes RSSI bounce (feed goes stale -> amber bars) even sitting next to the router.
-            WiFi.setSleep(false);
+            WiFi.setSleep(g_onBattery);           // modem sleep only on battery (see powerTick)
             Serial.printf("[adsb] WiFi up, IP %s (AP %s, ch %d, %d dBm)\n",
                           WiFi.localIP().toString().c_str(), WiFi.BSSIDstr().c_str(),
                           (int)WiFi.channel(), (int)WiFi.RSSI());
@@ -303,9 +307,10 @@ static void adsb_task(void*) {
                     }
                 }
             }
+            if (g_wxRefetch) { g_wxRefetch = false; nextWxRadarAt = nowMs; }   // new zoom step
             if ((int32_t)(nowMs - nextWxRadarAt) >= 0) {
                 Serial.println("[wxradar] fetching latest frame...");
-                if (wx_radar_fetch(g_settings.homeLat, g_settings.homeLon)) {
+                if (wx_radar_fetch(g_settings.homeLat, g_settings.homeLon, g_wxKm)) {
                     g_wxRadarDirty = true;
                     nextWxRadarAt = millis() + WX_RADAR_REFRESH_MS;
                 } else {
@@ -826,6 +831,27 @@ static void rtc_seed_clock() {
 static bool g_asleep    = false;   // face-down
 static bool g_idle      = false;   // no touch for a while
 static bool g_clockHold = false;   // idle with the clock on, but an emergency in range keeps the radar up
+// ---- Akku-Sparmodus: nur ohne USB-Strom ----
+// Am Netzteil läuft alles wie immer. Im Akkubetrieb: WLAN-Modem-Schlaf (der größte Posten:
+// das Funkteil wacht nur noch zu den Beacons auf), Prozessor auf BATT_CPU_MHZ, und nach der
+// eingestellten Zeit ohne Berührung geht der Bildschirm aus (Tippen weckt ihn); solange er
+// dunkel ist, ruhen Sweep und Neuzeichnen und der Prozessor läuft mit BATT_DARK_CPU_MHZ.
+// Eine Notfall-Squawk in der Nähe hält den Bildschirm an (wie beim Uhr-Ruhezustand).
+static void powerTick() {
+    static const uint32_t OFF_MS[5] = { 0, 60000UL, 120000UL, 300000UL, 600000UL };
+    const uint32_t offMs = OFF_MS[constrain(g_battOff, 0, 4)];
+    g_battDark = g_onBattery && offMs && display::inactiveMs() > offMs && !g_clockHold;
+    const int mode = !g_onBattery ? 0 : ((g_battDark || g_asleep) ? 2 : 1);
+    static int shown = -1;
+    if (mode == shown) return;
+    shown = mode;
+    if (WiFi.getMode() != WIFI_OFF) WiFi.setSleep(mode != 0);
+    setCpuFrequencyMhz(mode == 0 ? 240 : (mode == 1 ? BATT_CPU_MHZ : BATT_DARK_CPU_MHZ));
+    display::setPowerSave(mode == 2);
+    Serial.printf("[power] %s (CPU %u MHz)\n", mode == 0 ? "mains" : (mode == 1 ? "battery" : "battery, screen off"),
+                  (unsigned)getCpuFrequencyMhz());
+}
+
 static void applyBrightness() {
     const int day = g_brightnessDay;
     int b = day;
@@ -840,7 +866,7 @@ static void applyBrightness() {
     }
     if (g_night && display::inactiveMs() > NIGHT_WAKE_MS)        // night mode: nearly dark;
         b = min(b, NIGHT_BRIGHTNESS);                            // a touch lights it up again
-    if (g_asleep) b = 0;                                         // face-down -> screen off
+    if (g_asleep || g_battDark) b = 0;                           // face-down / battery saver -> off
     static int shown = -1;
     if (b != shown) { shown = b; display::setBrightness((uint8_t)b); }
 }
@@ -1716,6 +1742,7 @@ static int deviceSettingGet(int id) {
         case UI_SET_OVERHEAD:   return g_overheadOn ? 1 : 0;
         case UI_SET_ISS:        return g_issOn ? 1 : 0;
         case UI_SET_NIGHT:      return g_nightMode;
+        case UI_SET_BATTOFF:    return g_battOff;
         default:                return 0;
     }
 }
@@ -1807,6 +1834,10 @@ static void deviceSettingSet(int id, int v, bool save) {
         case UI_SET_NIGHT:
             g_nightMode = constrain(v, 0, 3);
             nvsPutInt("night", g_nightMode);
+            break;
+        case UI_SET_BATTOFF:
+            g_battOff = constrain(v, 0, 4);
+            nvsPutInt("battoff", g_battOff);
             break;
         case UI_SET_MAP:
             g_mapMode = constrain(v, 0, 2);       // loop() re-tints / hides; core 0 loads tiles only when on
@@ -1941,6 +1972,8 @@ void setup() {
         g_maxAltFt = p.getInt("maxalt", 0);
         g_lastView = p.getInt("lastview", 0);
         g_milOnly = p.getBool("milonly", false);
+        g_wxKm = p.getInt("wxkm", WX_ZOOM_DEFAULT_KM);
+        g_battOff = constrain(p.getInt("battoff", BATT_OFF_DEFAULT), 0, 4);
         // Migrate the old quarter-turn setting (rot=0..3) without changing existing
         // installations' orientation. New firmware stores actual degrees separately.
         g_rotation = p.isKey("rotDeg") ? p.getInt("rotDeg", 0) : p.getInt("rot", 0) * 90;
@@ -1955,6 +1988,15 @@ void setup() {
         g_adsb.setMilitaryOnly(g_milOnly);
         // restore the last active view (car installs power-cycle constantly) and keep
         // remembering it; NVS write only when the view actually changes.
+        ui_set_wx_zoom(g_wxKm);
+        ui_set_wx_zoom_cb([](int km) {          // Regenradar-Zoom: remember it, fetch at once
+            g_wxKm = km;
+            g_wxRefetch = true;
+            Preferences q;
+            q.begin("capsuleradar", false);
+            q.putInt("wxkm", km);
+            q.end();
+        });
         ui_show_view(g_lastView);
         ui_set_view_changed_cb([](int idx) {
             if (idx >= 4) return;   // settings, photo and ISS pages are never the start view after a reboot
@@ -2401,6 +2443,7 @@ void loop() {
     const bool showClock = wantClock && !g_clockHold;
     if (showClock != radar::clockRequested() && radar::setClock(showClock))
         Serial.println(showClock ? "[clock] idle: radar -> clock" : "[clock] radar is back");
+    powerTick();
     applyBrightness();
 
     delay(5);

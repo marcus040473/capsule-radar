@@ -43,6 +43,14 @@
 > Warnung). Außerhalb Deutschlands bzw. ohne DWD-Station: Open-Meteo und RainViewer wie bisher.
 > Stationsliste: `src/dwd_stations.h` (erzeugt mit `tools/gen_dwd_stations.py`). Quelle: DWD.
 >
+> **Regenradar-Zoom:** Tippen auf die km-Pille der Radarseite schaltet 15 / 25 / 50 / 100 /
+> 200 km (Radius des mittleren Rings). Mit dem DWD-Radar echtes Hineinzoomen, mit RainViewer
+> nur heraus.
+>
+> **Akku-Sparmodus** (nur ohne USB-Strom): WLAN-Stromsparen, Prozessor gedrosselt, Display
+> geht nach der eingestellten Zeit ohne Berührung aus (Einstellungen → „Display aus (Akku)“:
+> Nie / 1 / 2 / 5 / 10 Min., Tippen weckt es).
+>
 > **Handy-App:** im Ordner `android/` liegt die App „Lisas Radar“ (`LisasRadar.apk` im Release).
 > Sie findet das Radar im WLAN, zeigt seine Einstellungsseite und schickt mit einem Knopf den
 > Standort des Handys als neuen Mittelpunkt (`POST /loc`, ab Firmware 1.8.0-de13).

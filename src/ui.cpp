@@ -50,6 +50,10 @@ static lv_obj_t *s_wxCanvas = nullptr, *s_wxStatus = nullptr, *s_wxAirport = nul
 static lv_obj_t *s_wxFooter = nullptr, *s_wxMeta = nullptr, *s_wxAttrib = nullptr;
 static lv_obj_t *s_wxRings[3] = { nullptr, nullptr, nullptr };
 static lv_obj_t *s_wxNorth = nullptr, *s_wxCenter = nullptr, *s_wxRange = nullptr;
+static void (*s_wxZoomCb)(int) = nullptr;
+static int s_wxZoomWant = WX_ZOOM_DEFAULT_KM;   // asked for; the label shows the frame's own km
+static bool s_wxZoomPending = false;            // tapped: "..." until the next frame arrives
+static uint32_t s_wxZoomVer = 0;                // radar frame version at the tap
 static lv_obj_t *s_weatherModeBtn = nullptr, *s_weatherModeLbl = nullptr;
 static lv_obj_t *s_weatherTitle = nullptr;
 enum WeatherViewMode { WEATHER_RADAR, WEATHER_CLOUDS, WEATHER_FORECAST };
@@ -477,6 +481,9 @@ void ui_set_status(bool wifiUp, bool feedOk, int rssi, const char *clock) {
     }
     if (s_hudClock && clock) lv_label_set_text(s_hudClock, clock);
 }
+
+void ui_set_wx_zoom_cb(void (*cb)(int ringKm)) { s_wxZoomCb = cb; }
+void ui_set_wx_zoom(int ringKm) { s_wxZoomWant = ringKm; }
 
 void ui_set_battery(int pct, bool charging, bool present) {
     if (!s_hudBatt) return;
@@ -906,7 +913,19 @@ static void build_weather(void) {
             lv_obj_add_flag(s_fcWarn, LV_OBJ_FLAG_HIDDEN);
         }
     }
-    lv_label_set_text(s_wxRange, cloudMode ? "200 KM" : "75 KM");
+    if (cloudMode) {
+        lv_label_set_text(s_wxRange, "200 KM");
+        lv_obj_clear_flag(s_wxRange, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_border_opa(s_wxRange, LV_OPA_TRANSP, 0);
+    } else {                                     // a tappable pill: next zoom step
+        if (s_wxZoomPending && haveImage && version != s_wxZoomVer) s_wxZoomPending = false;
+        const float km = (haveImage && !s_wxZoomPending) ? wx_radar_ring_km() : (float)s_wxZoomWant;
+        char r[24];
+        snprintf(r, sizeof(r), "%.0f KM%s", km, s_wxZoomPending ? " ..." : "");
+        lv_label_set_text(s_wxRange, r);
+        lv_obj_add_flag(s_wxRange, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_border_opa(s_wxRange, 160, 0);
+    }
     lv_label_set_text(s_weatherModeLbl,
         s_weatherMode == WEATHER_RADAR ? "WOLKEN" :
         s_weatherMode == WEATHER_CLOUDS ? "3-TAGE-VORHERSAGE" : "WETTERRADAR");
@@ -1187,6 +1206,7 @@ static const char *const kSetTrail[]  = { "Aus", "Kurz", "Mittel", "Lang" };
 static const char *const kSetAlerts[] = { "Aus", "Nur Notfälle", "Neue + Notfälle" };
 static const char *const kSetMap[]    = { "Aus", "Dunkel", "Hell" };
 static const char *const kSetNight[]  = { "Aus", "22-7 Uhr", "23-6 Uhr", "21-8 Uhr" };
+static const char *const kSetBattOff[] = { "Nie", "1 Min.", "2 Min.", "5 Min.", "10 Min." };
 static const char *const kSetRotate[] = { "0\xC2\xB0", "90\xC2\xB0", "180\xC2\xB0", "270\xC2\xB0" };
 static const char *const kSetThemes[] = { "Phosphor", "Orb", "Amber CRT", "Militär" };
 
@@ -1199,6 +1219,7 @@ static int set_option_count(int id) {
         case UI_SET_ROTATE:  return 4;
         case UI_SET_MAP:     return 3;
         case UI_SET_NIGHT:   return 4;
+        case UI_SET_BATTOFF: return 5;
         case UI_SET_WIFINET: return s_netCount ? s_netCount() : 0;
         default:             return 0;
     }
@@ -1216,6 +1237,7 @@ static const char *set_option_text(int id, int v) {
         case UI_SET_ROTATE:  return kSetRotate[v];
         case UI_SET_MAP:     return kSetMap[v];
         case UI_SET_NIGHT:   return kSetNight[v];
+        case UI_SET_BATTOFF: return kSetBattOff[v];
         case UI_SET_WIFINET: { const char *s = s_netName ? s_netName(v) : nullptr; return (s && *s) ? s : "?"; }
         default:             return "-";
     }
@@ -1545,6 +1567,7 @@ static void settings_open(void) {
     set_add_switch(UI_SET_OVERHEAD, "Gerade über dir");
     set_add_switch(UI_SET_ISS, "ISS-Überflug melden");
     set_add_cycle(UI_SET_NIGHT, "Nachtmodus");
+    set_add_cycle(UI_SET_BATTOFF, "Display aus (Akku)");
     if (s_gpsPresent) set_add_switch(UI_SET_GPS, "GPS-Standort");
     {
         lv_obj_t *r = set_row("GPS-Signal", false);
@@ -2449,8 +2472,32 @@ void ui_create(void) {
     s_wxRange = lv_label_create(wp);
     lv_obj_set_style_text_font(s_wxRange, F12(), 0);
     lv_obj_set_style_text_color(s_wxRange, UI_GREEN, 0);
-    lv_label_set_text(s_wxRange, "75 KM");
-    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, WX_PX(128), 225);
+    lv_obj_set_style_bg_color(s_wxRange, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_wxRange, 170, 0);
+    lv_obj_set_style_border_color(s_wxRange, UI_GREEN, 0);
+    lv_obj_set_style_border_width(s_wxRange, 1, 0);
+    lv_obj_set_style_radius(s_wxRange, 9, 0);
+    lv_obj_set_style_pad_hor(s_wxRange, 6, 0);
+    lv_obj_set_style_pad_ver(s_wxRange, 2, 0);
+    lv_label_set_text(s_wxRange, "50 KM");
+    lv_obj_align(s_wxRange, LV_ALIGN_TOP_MID, WX_PX(146), 223);   // on the labelled (middle) ring
+    lv_obj_add_flag(s_wxRange, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(s_wxRange, 14);
+    lv_obj_add_event_cb(s_wxRange, [](lv_event_t *) {            // Regenradar: next zoom step
+        static const int steps[] = WX_ZOOM_STEPS;
+        const int n = (int)(sizeof(steps) / sizeof(steps[0]));
+        int i = 0;
+        while (i < n && steps[i] != s_wxZoomWant) ++i;
+        s_wxZoomWant = steps[(i + 1) % n];
+        uint32_t ver = 0;
+        wx_radar_front(nullptr, nullptr, nullptr, nullptr, &ver);
+        s_wxZoomVer = ver;
+        s_wxZoomPending = true;
+        char r[24];
+        snprintf(r, sizeof(r), "%d KM ...", s_wxZoomWant);
+        lv_label_set_text(s_wxRange, r);
+        if (s_wxZoomCb) s_wxZoomCb(s_wxZoomWant);
+    }, LV_EVENT_CLICKED, NULL);
 
     s_wxFooter = lv_label_create(wp);
     lv_obj_set_width(s_wxFooter, 360);

@@ -11,6 +11,14 @@ static uint16_t *s_front = nullptr, *s_back = nullptr;
 static uint32_t s_frameTime = 0, s_version = 0;
 static double s_lat = 0, s_lon = 0;
 static char s_pendingSrc[12] = "RAINVIEWER", s_src[12] = "RAINVIEWER";
+static float s_pendingKm = 50.0f, s_ringKm = 50.0f;
+
+void wx_radar_set_ring_km(float km) { s_pendingKm = km; }
+
+float wx_radar_ring_km(void) {
+    std::lock_guard<std::mutex> lock(s_mutex);
+    return s_ringKm;
+}
 
 void wx_radar_set_source(const char *source) {
     strncpy(s_pendingSrc, source ? source : "", sizeof(s_pendingSrc) - 1);
@@ -50,6 +58,7 @@ void wx_radar_commit(uint32_t frameTime, double lat, double lon) {
     uint16_t *old = s_front; s_front = s_back; s_back = old;
     s_frameTime = frameTime; s_lat = lat; s_lon = lon; ++s_version;
     memcpy(s_src, s_pendingSrc, sizeof(s_src));
+    s_ringKm = s_pendingKm;
 }
 
 bool wx_radar_front(const uint16_t **pixels, uint32_t *frameTime,

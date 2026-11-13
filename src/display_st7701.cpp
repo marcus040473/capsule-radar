@@ -948,11 +948,26 @@ bool begin() {
     return panelOk;
 }
 
+static bool s_powerSave = false;   // see setPowerSave()
+
 void loop() {
     if (!s_ready) return;
+    if (s_powerSave) {                  // dark panel on battery: just keep LVGL ticking slowly
+        static uint32_t last = 0;
+        if (millis() - last < DISPLAY_SAVE_MS) return;
+        last = millis();
+        lv_timer_handler();
+        return;
+    }
     if (sweep_ready()) sweep_poll_ui();
     lv_timer_handler();
     compose_step();
+}
+
+void setPowerSave(bool on) {
+    if (on == s_powerSave) return;
+    s_powerSave = on;
+    if (!on) lv_obj_invalidate(lv_scr_act());   // repaint everything when the panel lights up
 }
 
 // 0..255 -> PWM duty. Backlight is active-high on this board.
@@ -999,7 +1014,7 @@ void sweepConfig(uint16_t ring565, uint16_t lead565, uint16_t ink565, bool sweep
 // update runs many times faster. flush_cb's and loop()'s own ticks are not capped.
 void sweepTick() {
     static uint32_t doneMs = 0;
-    if (millis() - doneMs < TICK_WORK_MS) return;
+    if (s_powerSave || millis() - doneMs < TICK_WORK_MS) return;
     compose_step();
     doneMs = millis();
 }

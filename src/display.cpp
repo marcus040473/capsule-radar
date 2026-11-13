@@ -856,10 +856,25 @@ bool begin() {
     return true;
 }
 
+static bool s_powerSave = false;   // see setPowerSave()
+
 void loop() {
+    if (s_powerSave) {                  // dark panel on battery: just keep LVGL ticking slowly
+        static uint32_t last = 0;
+        if (millis() - last < DISPLAY_SAVE_MS) return;
+        last = millis();
+        lv_timer_handler();
+        return;
+    }
     if (sweep_ready()) sweep_poll_ui();
     lv_timer_handler();
     compose_step();
+}
+
+void setPowerSave(bool on) {
+    if (on == s_powerSave) return;
+    s_powerSave = on;
+    if (!on) lv_obj_invalidate(lv_scr_act());   // repaint everything when the panel lights up
 }
 
 void sweepConfig(uint16_t ring565, uint16_t lead565, uint16_t ink565, bool sweep, bool pulse) {
@@ -869,7 +884,7 @@ void sweepConfig(uint16_t ring565, uint16_t lead565, uint16_t ink565, bool sweep
     s_pulseInk = ink565;
     s_pulseWanted = pulse;
 }
-void sweepTick() { compose_step(); }
+void sweepTick() { if (!s_powerSave) compose_step(); }
 bool sweepAvailable() { return sweep_ready(); }
 float sweepAngleDeg() { return (float)(s_swPhase >> 8) * (360.0f / (float)ANG_UNITS); }
 

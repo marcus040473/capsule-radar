@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de16"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de17"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
@@ -80,6 +80,10 @@ static const float WEB_RANGE_KM[]   = {10.0f, 15.0f, 25.0f, 30.0f, 50.0f, 100.0f
 // DWD (Deutscher Wetterdienst) Open Data: Vorhersage von der nächsten MOSMIX-Station (höchstens
 // DWD_STATION_MAX_KM entfernt, sonst Open-Meteo), Messwerte von der nächsten Station mit
 // stündlichen Beobachtungen (höchstens DWD_OBS_MAX_KM), Warnungen alle DWD_WARN_REFRESH_MS.
+// Regenradar-Zoom: Radius des mittleren (beschrifteten) Rings in km; Tippen auf die km-Anzeige
+// schaltet weiter. Das DWD-Radar kann jede Stufe (1 km Auflösung), RainViewer nur ~50/100/200.
+#define WX_ZOOM_STEPS       { 15, 25, 50, 100, 200 }
+#define WX_ZOOM_DEFAULT_KM  50
 #define DWD_STATION_MAX_KM  60.0
 #define DWD_OBS_MAX_KM      30.0
 #define DWD_WARN_REFRESH_MS (10UL * 60UL * 1000UL)
@@ -120,6 +124,12 @@ static const float WEB_RANGE_KM[]   = {10.0f, 15.0f, 25.0f, 30.0f, 50.0f, 100.0f
 #define TZ_STR              "CET-1CEST,M3.5.0,M10.5.0/3"  // POSIX TZ (Spain) for local time/date
 #define BRIGHTNESS_IDLE     25             // dimmed after no touch for IDLE_DIM_MS
 #define IDLE_DIM_MS         20000          // dim the screen after this long without a touch
+// Akku-Sparmodus (nur ohne USB-Strom): WLAN-Stromsparen, Prozessor gedrosselt, und der
+// Bildschirm geht nach der eingestellten Zeit ohne Berührung aus (Tippen weckt ihn).
+#define BATT_CPU_MHZ        160            // on battery, screen on
+#define BATT_DARK_CPU_MHZ   80             // on battery, screen dark
+#define DISPLAY_SAVE_MS     200            // LVGL tick while the panel is dark on battery
+#define BATT_OFF_DEFAULT    2              // index into "Bildschirm aus (Akku)": Nie/1/2/5/10 min
 // Idle clock: instead of dimming, the radar animates into an analog clock (clock_face.h has
 // the animation, radar_view.cpp the dial and the dimmed scene, display.cpp's compositor the
 // moving hands). Angles 0 = 12 o'clock; lengths are fractions of RADAR_R_OUTER_PX.

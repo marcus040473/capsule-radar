@@ -17,6 +17,9 @@ void loop();
 // only wakes the screen, and a press that starts while it is dark never reaches LVGL, up to
 // its lift (TouchQueue::setWakeOnly).
 void setBrightness(uint8_t v);
+// Akku-Sparmodus while the panel is dark: LVGL runs only every DISPLAY_SAVE_MS and the sweep
+// compositor rests (nothing is visible anyway; a touch still wakes, see setBrightness).
+void setPowerSave(bool on);
 
 // ms since the last touch (LVGL inactivity timer) — for idle auto-dim.
 uint32_t inactiveMs();

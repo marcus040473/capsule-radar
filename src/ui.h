@@ -16,6 +16,9 @@ void ui_set_feed_source(const char *host);  // Stats "Feed" line: which ADS-B pr
 void ui_set_gps(int state, int sats, float altM);   // GPS indicator: state 0=off/hidden 1=acquiring 2=fix; HUD icon + Stats line (altM = GPS altitude, NAN if unknown)
 void ui_splash_show(void);  // branded boot splash (auto-fades, covers init time)
 void ui_set_range_cb(void (*cb)(float km));  // on-screen zoom button -> notify main
+// Regenradar-Zoom (Tippen auf die km-Anzeige der Radarseite): km des beschrifteten Rings
+void ui_set_wx_zoom_cb(void (*cb)(int ringKm));
+void ui_set_wx_zoom(int ringKm);                // start value (from NVS)
 void ui_set_range_km(float km);              // update the zoom button label / sync the cycle
 void ui_set_units(int preset);               // 0 = Aviation (ft,kt,km) · 1 = Metric (m,km/h,km) · 2 = Imperial (ft,mph,mi)
 void ui_set_temp_unit(int t);                // weather temperature: 0 = follow Units · 1 = °C · 2 = °F
@@ -49,6 +52,7 @@ enum UiSetting {
     UI_SET_OVERHEAD,    // 0/1   "Gerade über dir" melden
     UI_SET_ISS,         // 0/1   sichtbare ISS-Überflüge melden
     UI_SET_NIGHT,       // 0..3  Nachtmodus: Aus / 22-7 / 23-6 / 21-8 Uhr
+    UI_SET_BATTOFF,     // 0..4  Bildschirm aus im Akkubetrieb: Nie / 1 / 2 / 5 / 10 min
     UI_SET_COUNT
 };
 void ui_set_settings_cb(int (*get)(int id), void (*set)(int id, int value, bool save));
