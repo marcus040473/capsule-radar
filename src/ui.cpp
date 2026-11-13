@@ -485,7 +485,7 @@ void ui_set_battery(int pct, bool charging, bool present) {
                       pct > 35 ? LV_SYMBOL_BATTERY_2 :
                       pct > 12 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
     char buf[24];
-    snprintf(buf, sizeof(buf), "%s%s%d", charging ? LV_SYMBOL_CHARGE : "", sym, pct);
+    snprintf(buf, sizeof(buf), "%s%s %d%%", charging ? LV_SYMBOL_CHARGE : "", sym, pct);   // "78 %"
     lv_label_set_text(s_hudBatt, buf);
     lv_obj_set_style_text_color(s_hudBatt, (pct <= 15 && !charging) ? UI_EMERG : UI_INK, 0);
 }
@@ -2157,11 +2157,11 @@ void ui_create(void) {
     lv_label_set_text(s_hudClock, "--:--");
     lv_obj_align(s_hudClock, LV_ALIGN_TOP_MID, 30, 50);
 
-    s_hudBatt = lv_label_create(s_tileRadar);
-    lv_obj_set_style_text_font(s_hudBatt, F14(), 0);
+    s_hudBatt = lv_label_create(s_tileRadar);     // battery: a size up from the rest, with "%"
+    lv_obj_set_style_text_font(s_hudBatt, s_bigText ? &lv_font_montserrat_20 : &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(s_hudBatt, UI_INK, 0);
     lv_label_set_text(s_hudBatt, "");
-    lv_obj_align(s_hudBatt, LV_ALIGN_TOP_MID, 92, 50);
+    lv_obj_align(s_hudBatt, LV_ALIGN_TOP_LEFT, SCREEN_W / 2 + 64, s_bigText ? 45 : 47);   // left edge fixed: grows rightwards
 
     s_hudDate = lv_label_create(s_tileRadar);
     lv_obj_set_style_text_font(s_hudDate, F12(), 0);
