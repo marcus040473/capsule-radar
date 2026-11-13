@@ -155,6 +155,8 @@ static const struct { const char *label; const char *tz; int offMin; int dst; } 
 static const int TZOPTS_N = sizeof(TZOPTS) / sizeof(TZOPTS[0]);
 
 // ---- networking task (core 0): fetch + parse, never touches the display ----
+static void iss_service();   // ISS position (defined with the ISS code further down)
+
 static void adsb_task(void*) {
     std::vector<Aircraft> fresh;
     AircraftSnapshotGate snapshotGate;
@@ -1979,9 +1981,9 @@ void setup() {
     g_cartoKey.trim();
     map_client_set_carto_key(g_cartoKey.c_str());
     map_bg_set_source(g_cartoKey.length() ? MAP_SRC_CARTO : MAP_SRC_OSM);   // no key: OpenStreetMap
-    user_photo_begin();   // LittleFS + first decode
+    user_photo_begin();   // LittleFS + first decode of the own photo (on core 0, once adsb_task runs)
     dayLoad();            // today's records survive a restart (LittleFS is up now)
-    dayPublish(); of the own photo (on core 0, once adsb_task runs)
+    dayPublish();         // ... and show them on the Stats page
 
     float queryKm = queryRadiusKm();
     g_queryLat = g_settings.homeLat; g_queryLon = g_settings.homeLon;
