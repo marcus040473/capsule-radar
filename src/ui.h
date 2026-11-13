@@ -46,6 +46,9 @@ enum UiSetting {
     UI_SET_GPS,         // 0/1   GPS-Standort (nur mit GPS-Modul, "-G"-Board)
     UI_SET_MAP,         // 0..2  Karte unter dem Radar: Aus / Dunkel / Hell
     UI_SET_QUOTE,       // 0/1   Spruch des Tages
+    UI_SET_OVERHEAD,    // 0/1   "Gerade über dir" melden
+    UI_SET_ISS,         // 0/1   sichtbare ISS-Überflüge melden
+    UI_SET_NIGHT,       // 0..3  Nachtmodus: Aus / 22-7 / 23-6 / 21-8 Uhr
     UI_SET_COUNT
 };
 void ui_set_settings_cb(int (*get)(int id), void (*set)(int id, int value, bool save));
@@ -59,6 +62,12 @@ void ui_set_gps_present(bool present);
 // Nachricht über allem (Spruch des Tages): bleibt, bis OK getippt wird; dann onOk().
 void ui_show_message(const char *title, const char *text, void (*onOk)(void));
 bool ui_message_up(void);
+// Kurzer Hinweis oben auf dem Bildschirm ("Gerade über dir", "ISS sichtbar"), verschwindet nach
+// ms von selbst. hex != "": ein Tipp darauf zeigt dieses Flugzeug auf dem Radar.
+void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex);
+// Tagesrekorde für die Statistik-Seite (Tipp auf die Seite: Jetzt <-> Heute).
+void ui_set_day_stats(int count, float maxAltFt, const char *altCall, float maxGsKt, const char *gsCall,
+                      float minDistKm, const char *distCall);
 // Flugzeug verfolgen: das Auge auf der Detailkarte ruft cb(hex) (Start) bzw. cb("") (Ende).
 void ui_set_follow_cb(void (*cb)(const char *hex));
 // main.cpp meldet den Zustand: verfolgtes Flugzeug (hex, Rufzeichen; "" = keins) und seine

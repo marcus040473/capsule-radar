@@ -206,7 +206,7 @@ static void save_shot(const char *prefix, const char *name) {
 }
 
 // Settings page mock (the device keeps these in main.cpp + NVS).
-static int s_simSet[UI_SET_COUNT] = { 180, 2, 2, 0, 2, 0, 1, 1, 0, 1, 1, 0, 1 };
+static int s_simSet[UI_SET_COUNT] = { 180, 2, 2, 1, 2, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1 };
 static const char *const s_simNets[] = { "FRITZ!Box 7590 XY", "Handy-Hotspot" };
 static int         sim_net_count(void) { return 2; }
 static const char *sim_net_name(int i) { return (i >= 0 && i < 2) ? s_simNets[i] : ""; }

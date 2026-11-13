@@ -673,8 +673,44 @@ static void build_list(void) {
     }
 }
 
+// Tagesrekorde (main.cpp), shown instead of the live numbers after a tap on the Stats page
+static bool  s_statsDay = false;
+static lv_obj_t *s_statsTitle = nullptr, *s_statsHint = nullptr;
+static int   s_dayCount = 0;
+static float s_dayAltFt = -1, s_dayGsKt = -1, s_dayDistKm = -1;
+static char  s_dayAltCall[12] = "", s_dayGsCall[12] = "", s_dayDistCall[12] = "";
+void ui_set_day_stats(int count, float maxAltFt, const char *altCall, float maxGsKt, const char *gsCall,
+                      float minDistKm, const char *distCall) {
+    s_dayCount = count; s_dayAltFt = maxAltFt; s_dayGsKt = maxGsKt; s_dayDistKm = minDistKm;
+    snprintf(s_dayAltCall, sizeof(s_dayAltCall), "%s", altCall ? altCall : "");
+    snprintf(s_dayGsCall, sizeof(s_dayGsCall), "%s", gsCall ? gsCall : "");
+    snprintf(s_dayDistCall, sizeof(s_dayDistCall), "%s", distCall ? distCall : "");
+}
+
+static void build_day_stats(void) {
+    char alt[16] = "-", spd[16] = "-", dist[16] = "-";
+    if (s_dayAltFt >= 0)  fmt_alt(alt, sizeof(alt), s_dayAltFt, false);
+    if (s_dayGsKt >= 0)   fmt_spd(spd, sizeof(spd), s_dayGsKt);
+    if (s_dayDistKm >= 0) snprintf(dist, sizeof(dist), "%.1f %s", dist_val(s_dayDistKm), dist_unit());
+    char st[300];
+    snprintf(st, sizeof(st),
+             "Flugzeuge    %d\n"
+             "Höchstes     %s\n"
+             "             %s\n"
+             "Schnellstes  %s\n"
+             "             %s\n"
+             "Nächstes     %s\n"
+             "             %s",
+             s_dayCount, alt, s_dayAltCall[0] ? s_dayAltCall : "-", spd, s_dayGsCall[0] ? s_dayGsCall : "-",
+             dist, s_dayDistCall[0] ? s_dayDistCall : "-");
+    lv_label_set_text(s_statsLbl, st);
+}
+
 static void build_stats(void) {
     if (!s_statsLbl) return;
+    if (s_statsTitle) lv_label_set_text(s_statsTitle, s_statsDay ? "HEUTE" : "STATISTIK");
+    if (s_statsHint)  lv_label_set_text(s_statsHint, s_statsDay ? "Tippen: jetzt" : "Tippen: Rekorde von heute");
+    if (s_statsDay) { build_day_stats(); return; }
     const int n = radar::count();
     int emg = 0;
     float nearest = 1e9f, highest = -1e9f;
@@ -891,13 +927,14 @@ static void clock_catcher_release_cb(lv_event_t *e) {
 
 // Sweep compositor hooks (polled by display.cpp every loop pass).
 static lv_obj_t *s_msg = nullptr;   // message card on the top layer (ui_show_message)
+static lv_obj_t *s_toast = nullptr;     // short notice on the top layer (ui_show_toast)
 bool ui_sweep_visible(void) {
     // not while a message covers the radar: the compositor would paint the sweep over it
     return s_tv && !s_msg && lv_tileview_get_tile_act(s_tv) == s_tileRadar && !lv_obj_is_scrolling(s_tv);
 }
 
 int ui_sweep_masks(int16_t out[][5], int max) {
-    lv_obj_t *objs[5] = { s_card, s_photo, s_photoCredit, s_zoomBtn, s_holdHint };   // detail card, its photo, range button, hold hint
+    lv_obj_t *objs[6] = { s_card, s_photo, s_photoCredit, s_zoomBtn, s_holdHint, s_toast };   // + the notice (toast)
     int n = 0;
     for (lv_obj_t *o : objs) {
         if (n >= max || !o || lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) continue;
@@ -1106,6 +1143,7 @@ static const char *const kSetUnits[]  = { "Luftfahrt", "Metrisch", "Imperial" };
 static const char *const kSetTrail[]  = { "Aus", "Kurz", "Mittel", "Lang" };
 static const char *const kSetAlerts[] = { "Aus", "Nur Notfälle", "Neue + Notfälle" };
 static const char *const kSetMap[]    = { "Aus", "Dunkel", "Hell" };
+static const char *const kSetNight[]  = { "Aus", "22-7 Uhr", "23-6 Uhr", "21-8 Uhr" };
 static const char *const kSetRotate[] = { "0\xC2\xB0", "90\xC2\xB0", "180\xC2\xB0", "270\xC2\xB0" };
 static const char *const kSetThemes[] = { "Phosphor", "Orb", "Amber CRT", "Militär" };
 
@@ -1117,6 +1155,7 @@ static int set_option_count(int id) {
         case UI_SET_TRAIL:   return 4;
         case UI_SET_ROTATE:  return 4;
         case UI_SET_MAP:     return 3;
+        case UI_SET_NIGHT:   return 4;
         case UI_SET_WIFINET: return s_netCount ? s_netCount() : 0;
         default:             return 0;
     }
@@ -1133,6 +1172,7 @@ static const char *set_option_text(int id, int v) {
         case UI_SET_TRAIL:   return kSetTrail[v];
         case UI_SET_ROTATE:  return kSetRotate[v];
         case UI_SET_MAP:     return kSetMap[v];
+        case UI_SET_NIGHT:   return kSetNight[v];
         case UI_SET_WIFINET: { const char *s = s_netName ? s_netName(v) : nullptr; return (s && *s) ? s : "?"; }
         default:             return "-";
     }
@@ -1459,6 +1499,9 @@ static void settings_open(void) {
     set_add_switch(UI_SET_HIDEGROUND, "Am Boden ausblenden");
     set_add_switch(UI_SET_CLOCK, "Uhr im Ruhezustand");
     set_add_switch(UI_SET_QUOTE, "Spruch des Tages");
+    set_add_switch(UI_SET_OVERHEAD, "Gerade über dir");
+    set_add_switch(UI_SET_ISS, "ISS-Überflug melden");
+    set_add_cycle(UI_SET_NIGHT, "Nachtmodus");
     if (s_gpsPresent) set_add_switch(UI_SET_GPS, "GPS-Standort");
     {
         lv_obj_t *r = set_row("GPS-Signal", false);
@@ -1515,7 +1558,7 @@ static void build_settings(void) {
 static void (*s_msgOk)(void) = nullptr;
 
 static void msg_ok_cb(lv_event_t *) {
-    if (s_msg) { lv_obj_del(s_msg); s_msg = nullptr; }
+    if (s_msg) { lv_obj_del_async(s_msg); s_msg = nullptr; }   // async: we are inside its button's click
     void (*cb)(void) = s_msgOk;
     s_msgOk = nullptr;
     if (cb) cb();
@@ -1570,6 +1613,58 @@ void ui_show_message(const char *title, const char *text, void (*onOk)(void)) {
     lv_obj_set_style_text_color(bl, lv_color_hex(0x04140B), 0);
     lv_label_set_text(bl, "OK");
     lv_obj_center(bl);
+}
+
+// --------------------------------------------------------------------- toast
+// "Gerade über dir" / "ISS sichtbar": a rounded notice near the top, gone after a while.
+// Built on demand and deleted when it goes (a few objects, ~1 KB of LVGL heap meanwhile).
+static lv_timer_t *s_toastTimer = nullptr;
+static char s_toastHex[8] = "";
+
+static void toast_close(void) {
+    if (s_toastTimer) { lv_timer_del(s_toastTimer); s_toastTimer = nullptr; }
+    if (s_toast) { lv_obj_del_async(s_toast); s_toast = nullptr; }   // async: may run inside its own click
+}
+
+void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex) {
+    toast_close();
+    snprintf(s_toastHex, sizeof(s_toastHex), "%s", hex ? hex : "");
+    s_toast = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(s_toast);
+    lv_obj_set_width(s_toast, s_bigText ? 340 : 310);
+    lv_obj_set_height(s_toast, LV_SIZE_CONTENT);
+    lv_obj_align(s_toast, LV_ALIGN_TOP_MID, 0, s_bigText ? 130 : 124);
+    lv_obj_set_style_bg_color(s_toast, UI_PANEL, 0);
+    lv_obj_set_style_bg_opa(s_toast, 240, 0);
+    lv_obj_set_style_border_color(s_toast, UI_GREEN, 0);
+    lv_obj_set_style_border_width(s_toast, 2, 0);
+    lv_obj_set_style_radius(s_toast, 14, 0);
+    lv_obj_set_style_pad_all(s_toast, 10, 0);
+    lv_obj_set_style_pad_row(s_toast, 4, 0);
+    lv_obj_set_flex_flow(s_toast, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_toast, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(s_toast, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(s_toast, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_toast, [](lv_event_t *) {
+        if (s_toastHex[0] && radar::selectHex(s_toastHex)) {   // show that plane on the radar
+            ui_show_view(0);
+            refresh_card();
+        }
+        toast_close();
+    }, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *t = lv_label_create(s_toast);
+    lv_obj_set_style_text_font(t, F16(), 0);
+    lv_obj_set_style_text_color(t, UI_GREEN, 0);
+    lv_label_set_text(t, title ? title : "");
+    lv_obj_t *m = lv_label_create(s_toast);
+    lv_obj_set_width(m, lv_pct(100));
+    lv_obj_set_style_text_font(m, F14(), 0);
+    lv_obj_set_style_text_color(m, UI_INK, 0);
+    lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(m, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(m, text ? text : "");
+    s_toastTimer = lv_timer_create([](lv_timer_t *) { s_toastTimer = nullptr; toast_close(); }, ms ? ms : 12000, nullptr);
+    lv_timer_set_repeat_count(s_toastTimer, 1);
 }
 
 // --------------------------------------------------------------------- photo
@@ -1865,7 +1960,15 @@ void ui_create(void) {
 
     // --- stats tile (circular panel) ---
     lv_obj_t *sp = make_round_panel(s_tileStats);
-    make_tile_title(sp, "STATISTIK");
+    s_statsTitle = make_tile_title(sp, "STATISTIK");
+    // a tap anywhere on the page swaps the live numbers for today's records (and back)
+    lv_obj_add_flag(sp, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(sp, [](lv_event_t *) { s_statsDay = !s_statsDay; build_stats(); }, LV_EVENT_CLICKED, NULL);
+    s_statsHint = lv_label_create(sp);
+    lv_obj_set_style_text_font(s_statsHint, F12(), 0);
+    lv_obj_set_style_text_color(s_statsHint, UI_DIM, 0);
+    lv_label_set_text(s_statsHint, "Tippen: Rekorde von heute");
+    lv_obj_align(s_statsHint, LV_ALIGN_CENTER, 0, s_bigText ? 74 : 66);
     s_statsLbl = lv_label_create(sp);
     lv_obj_set_style_text_font(s_statsLbl, F16(), 0);
     lv_obj_set_style_text_color(s_statsLbl, UI_SOFT, 0);

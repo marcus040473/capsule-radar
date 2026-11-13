@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de10"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de11"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
@@ -19,6 +19,19 @@
 // dieser Anteil der Reichweite von der Mitte weg ist; nach FOLLOW_LOST_MS ohne Daten endet es.
 #define FOLLOW_RECENTER_FRAC 0.35f
 #define FOLLOW_LOST_MS       60000UL
+
+// "Gerade über dir": Hinweis, wenn ein Flugzeug näher als OVERHEAD_KM am Standort ist
+// (einmal je Flugzeug innerhalb von OVERHEAD_REPEAT_MS).
+#define OVERHEAD_KM          2.5f
+#define OVERHEAD_REPEAT_MS   (30UL * 60UL * 1000UL)
+// Nachtmodus: so hell (5..255), sobald NIGHT_WAKE_MS niemand das Display berührt hat.
+#define NIGHT_BRIGHTNESS     6
+#define NIGHT_WAKE_MS        20000UL
+// ISS: Hinweis, wenn sie von der Sonne beschienen mindestens ISS_MIN_ELEV_DEG über dem Horizont
+// steht, während es am Standort dunkel ist (Sonne tiefer als ISS_SUN_BELOW_DEG).
+#define ISS_MIN_ELEV_DEG     10.0
+#define ISS_SUN_BELOW_DEG    (-6.0)
+#define ISS_REPEAT_MS        (15UL * 60UL * 1000UL)
 // Name des Geräts auf Webseite, Update-Seite, WLAN-Portal und Statistik-Seite.
 #define UI_APP_NAME       "Lisas Flug- & Wetterradar"
 // Name auf dem Startbild (zwei Zeilen, damit er auf das runde Display passt).

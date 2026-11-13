@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <vector>
+#include <algorithm>                 // day records: sorted ICAO list
 #include "config.h"
 #include "web_input.h"              // strict parsing of numbers from the config page
 #include "aircraft.h"
@@ -16,6 +17,9 @@
 #include "map_bg.h"                   // map under the radar (portable part)
 #include "map_client.h"               // its tile downloads (core 0)
 #include "quotes.h"                   // Spruch des Tages
+#include "sky.h"                      // ISS: sun and satellite elevation
+#include "net_fetch.h"                // ISS position (small JSON)
+#include <ArduinoJson.h>
 #include "user_photo.h"               // own photo for the photo page (LittleFS + PSRAM)
 #include <LittleFS.h>
 #include "weather.h"
@@ -84,6 +88,10 @@ static int                   g_maxAltFt     = 0;                     // only sho
 static int                   g_lastView     = 0;                     // last active view (0 radar/1 list/2 stats/3 weather) (NVS)
 static bool                  g_bootedIntoPortal = false;             // saved WiFi absent at boot (e.g. car hotspot not up yet)
 static bool                  g_quoteOn = true;                       // Spruch des Tages (NVS "quote")
+static bool                  g_overheadOn = true;                    // "Gerade über dir" (NVS "overhead")
+static bool                  g_issOn = true;                         // ISS-Überflug melden (NVS "iss")
+static int                   g_nightMode = 1;                        // 0 off, 1 = 22-7, 2 = 23-6, 3 = 21-8 (NVS "night")
+static volatile bool         g_night = false;                        // inside the night window right now
 static long                  g_quoteDone = 0;                        // date (YYYYMMDD) whose quote was confirmed with OK
 static long                  g_quoteShowing = 0;                     // date of the quote on screen now
 static String                g_cartoKey;                             // optional CARTO basemap key (web page); empty = OpenStreetMap
@@ -313,6 +321,7 @@ static void adsb_task(void*) {
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
             map_client_service(g_mapMode > 0);   // map under the radar: at most one tile per pass
+            iss_service();                         // ISS position, only after dark
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -342,6 +351,9 @@ static void loadSettings() {
     g_mapMode          = constrain(p.getInt("mapmode", 1), 0, 2);
     g_cartoKey         = p.getString("cartokey", "");
     g_quoteOn          = p.getBool("quote", true);
+    g_overheadOn       = p.getBool("overhead", true);
+    g_issOn            = p.getBool("iss", true);
+    g_nightMode        = constrain(p.getInt("night", 1), 0, 3);
     g_quoteDone        = p.getLong("quoteday", 0);
     g_tempUnit         = p.getInt("tempu", 0);
     g_tz               = p.getString("tz", TZ_STR);
@@ -409,6 +421,171 @@ static void setQueryCenter() {
     const RadarSettings v = viewSettings();
     g_queryLat = v.homeLat;
     g_queryLon = v.homeLon;
+}
+
+// ---- Nachtmodus ----
+static bool nightWindow(const struct tm &ti) {
+    static const int win[4][2] = { {0, 0}, {22, 7}, {23, 6}, {21, 8} };   // start hour, end hour
+    if (g_nightMode <= 0 || g_nightMode > 3) return false;
+    const int h = ti.tm_hour, s = win[g_nightMode][0], e = win[g_nightMode][1];
+    return s > e ? (h >= s || h < e) : (h >= s && h < e);
+}
+static void nightTick(const struct tm &ti) {       // once a second, with a valid clock
+    const bool n = nightWindow(ti);
+    if (n == g_night) return;
+    g_night = n;
+    audio_set_muted(g_muted || n);                 // quiet at night; the saved mute is unchanged
+    Serial.printf("[night] %s\n", n ? "on" : "off");
+}
+
+// ---- "Gerade über dir" ----
+static void fmtAltShort(char *b, size_t n, float ft) {
+    if (g_units == 1) snprintf(b, n, "%.0f m", ft * 0.3048f);
+    else              snprintf(b, n, "%.0f ft", ft);
+}
+static void overheadTick() {
+    struct Seen { String hex; uint32_t ms; };
+    static std::vector<Seen> recent;
+    const uint32_t now = millis();
+    for (size_t i = 0; i < recent.size();)          // forget planes notified long ago
+        if (now - recent[i].ms > OVERHEAD_REPEAT_MS) recent.erase(recent.begin() + i); else ++i;
+    if (!g_overheadOn || g_night || ui_message_up()) return;
+    const Aircraft *best = nullptr;
+    double bestD = OVERHEAD_KM;
+    for (const Aircraft &a : g_snap) {
+        if (a.onGround || a.altBaro != a.altBaro) continue;
+        const double d = geo::haversineKm(g_settings.homeLat, g_settings.homeLon, a.lat, a.lon);
+        if (d > bestD) continue;
+        bool known = false;
+        for (const Seen &s : recent) if (s.hex == a.hex) { known = true; break; }
+        if (!known) { best = &a; bestD = d; }
+    }
+    if (!best) return;
+    recent.push_back({best->hex, now});
+    String call = best->flight; call.trim();
+    if (!call.length()) call = best->hex;
+    char alt[16]; fmtAltShort(alt, sizeof(alt), best->altBaro);
+    char from[40] = "", to[40] = "", text[120];
+    const bool haveRoute = route_get(call.c_str(), from, sizeof(from), to, sizeof(to)) && to[0];
+    if (!haveRoute) route_request(call.c_str());   // so a tap on the notice shows the route soon
+    snprintf(text, sizeof(text), "%s%s%s  \xC2\xB7  %s%s%s", call.c_str(), best->type.length() ? "  " : "",
+             best->type.c_str(), alt, haveRoute ? "\nnach " : "", haveRoute ? to : "");
+    ui_show_toast("Gerade \xC3\xBC" "ber dir", text, 15000, best->hex.c_str());
+    Serial.printf("[overhead] %s %.1f km\n", call.c_str(), bestD);
+}
+
+// ---- Tagesrekorde (LittleFS /day.bin, damit ein Neustart sie nicht löscht) ----
+struct DayRec {
+    long  day = 0;                                  // YYYYMMDD
+    int   count = 0;
+    float maxAlt = -1, maxGs = -1, minDist = -1;
+    char  altCall[10] = "", gsCall[10] = "", distCall[10] = "";
+};
+static DayRec g_day;
+static std::vector<uint32_t> g_dayHex;              // sorted ICAO ids seen today (count = size)
+static bool g_dayDirty = false;
+static const char *DAY_FILE = "/day.bin";
+static const size_t DAY_MAX_HEX = 4000;
+
+static void dayLoad() {
+    File f = LittleFS.open(DAY_FILE, "r");
+    if (!f) return;
+    DayRec r; uint32_t n = 0;
+    if (f.read((uint8_t *)&r, sizeof(r)) == sizeof(r) && f.read((uint8_t *)&n, 4) == 4 && n <= DAY_MAX_HEX) {
+        g_dayHex.resize(n);
+        if (n == 0 || f.read((uint8_t *)g_dayHex.data(), n * 4) == n * 4) g_day = r;
+        else g_dayHex.clear();
+    }
+    f.close();
+}
+static void daySave() {
+    File f = LittleFS.open(DAY_FILE, "w");
+    if (!f) return;
+    const uint32_t n = g_dayHex.size();
+    f.write((const uint8_t *)&g_day, sizeof(g_day));
+    f.write((const uint8_t *)&n, 4);
+    if (n) f.write((const uint8_t *)g_dayHex.data(), n * 4);
+    f.close();
+    g_dayDirty = false;
+}
+static void dayPublish() {
+    ui_set_day_stats(g_day.count, g_day.maxAlt, g_day.altCall, g_day.maxGs, g_day.gsCall, g_day.minDist, g_day.distCall);
+}
+static void callOf(const Aircraft &a, char *b, size_t n) {
+    String c = a.flight; c.trim();
+    snprintf(b, n, "%s", c.length() ? c.c_str() : a.hex.c_str());
+}
+static void dayTick() {                             // each snapshot
+    struct tm ti;
+    if (!getLocalTime(&ti, 0) || ti.tm_year < 125) return;
+    const long today = (long)(ti.tm_year + 1900) * 10000L + (ti.tm_mon + 1) * 100L + ti.tm_mday;
+    if (g_day.day != today) { g_day = DayRec(); g_day.day = today; g_dayHex.clear(); g_dayDirty = true; }
+    for (const Aircraft &a : g_snap) {
+        const double d = geo::haversineKm(g_settings.homeLat, g_settings.homeLon, a.lat, a.lon);
+        if (d > g_settings.rangeKm) continue;       // the circle around home, like the radar
+        const uint32_t id = (uint32_t)strtoul(a.hex.c_str(), nullptr, 16);
+        auto it = std::lower_bound(g_dayHex.begin(), g_dayHex.end(), id);
+        if ((it == g_dayHex.end() || *it != id) && g_dayHex.size() < DAY_MAX_HEX) {
+            g_dayHex.insert(it, id);
+            g_day.count = (int)g_dayHex.size();
+            g_dayDirty = true;
+        }
+        if (!a.onGround && a.altBaro == a.altBaro && a.altBaro > g_day.maxAlt) {
+            g_day.maxAlt = a.altBaro; callOf(a, g_day.altCall, sizeof(g_day.altCall)); g_dayDirty = true;
+        }
+        if (a.gs == a.gs && a.gs > g_day.maxGs) {
+            g_day.maxGs = a.gs; callOf(a, g_day.gsCall, sizeof(g_day.gsCall)); g_dayDirty = true;
+        }
+        if (!a.onGround && (g_day.minDist < 0 || d < g_day.minDist)) {
+            g_day.minDist = (float)d; callOf(a, g_day.distCall, sizeof(g_day.distCall)); g_dayDirty = true;
+        }
+    }
+    static uint32_t lastSave = 0;
+    if (g_dayDirty && millis() - lastSave > 10UL * 60UL * 1000UL) { lastSave = millis(); daySave(); }
+    dayPublish();
+}
+
+// ---- ISS: ein sichtbarer Überflug (Kern 0 holt die Position, Kern 1 zeigt den Hinweis) ----
+static volatile bool  g_issNew = false;             // core 0 -> core 1: a fresh, visible position
+static volatile float g_issElev = 0, g_issBearing = 0;
+static void iss_service() {                          // core 0 (adsb_task), WiFi up
+    static uint32_t nextMs = 0;
+    if (!g_issOn || (int32_t)(millis() - nextMs) < 0) return;
+    nextMs = millis() + 90000UL;
+    const time_t now = time(nullptr);
+    if (now < 1700000000L) return;                   // no clock yet
+    if (sky::sunElevationDeg(g_settings.homeLat, g_settings.homeLon, now) > ISS_SUN_BELOW_DEG) {
+        nextMs = millis() + 5UL * 60UL * 1000UL;     // daylight: you could not see it anyway
+        return;
+    }
+    uint8_t *buf = nullptr; size_t len = 0;
+    if (!net_fetch_psram("https://api.wheretheiss.at/v1/satellites/25544", ADSB_USER_AGENT, &buf, &len, 8192, 3500, 6000))
+        return;
+    JsonDocument doc;
+    const bool ok = !deserializeJson(doc, (const char *)buf, len);
+    heap_caps_free(buf);
+    if (!ok) return;
+    const double lat = doc["latitude"] | 0.0, lon = doc["longitude"] | 0.0, alt = doc["altitude"] | 420.0;
+    const bool sunlit = strcmp(doc["visibility"] | "", "daylight") == 0;   // the ISS itself in sunlight
+    const double elev = sky::elevationDeg(g_settings.homeLat, g_settings.homeLon, lat, lon, alt);
+    if (elev > -15.0) nextMs = millis() + 20000UL;   // close: look again soon, a pass lasts minutes
+    if (sunlit && elev >= ISS_MIN_ELEV_DEG) {
+        g_issElev = (float)elev;
+        g_issBearing = (float)sky::bearingDeg(g_settings.homeLat, g_settings.homeLon, lat, lon);
+        g_issNew = true;
+    }
+}
+static void issTick() {                              // core 1 (loop)
+    static uint32_t lastToast = 0;
+    if (!g_issNew) return;
+    g_issNew = false;
+    if (lastToast && millis() - lastToast < ISS_REPEAT_MS) return;
+    lastToast = millis();
+    char text[120];
+    snprintf(text, sizeof(text), "Jetzt Richtung %s, %d\xC2\xB0 \xC3\xBC" "ber dem Horizont.\nEin heller Punkt, der ruhig \xC3\xBC" "ber den Himmel zieht.",
+             sky::compassWord(g_issBearing), (int)lroundf(g_issElev));
+    ui_show_toast("ISS sichtbar!", text, 30000, "");
+    Serial.printf("[iss] visible: %.0f deg elevation, bearing %.0f\n", (double)g_issElev, (double)g_issBearing);
 }
 
 // ---- Flugzeug verfolgen (das Auge auf der Detailkarte) ----
@@ -527,6 +704,8 @@ static void applyBrightness() {
     } else if (g_idle && !g_clockHold) {
         b = min(day, BRIGHTNESS_IDLE);                           // idle only dims down
     }
+    if (g_night && display::inactiveMs() > NIGHT_WAKE_MS)        // night mode: nearly dark;
+        b = min(b, NIGHT_BRIGHTNESS);                            // a touch lights it up again
     if (g_asleep) b = 0;                                         // face-down -> screen off
     static int shown = -1;
     if (b != shown) { shown = b; display::setBrightness((uint8_t)b); }
@@ -989,7 +1168,7 @@ static void handleBright() {
 static void handleVol() {
     if (refuseUnlessPageFetch()) return;
     if (g_web.hasArg("v"))    { g_volume = constrain((int)g_web.arg("v").toInt(), 0, 100); audio_set_volume(g_volume); }
-    if (g_web.hasArg("mute")) { g_muted = g_web.arg("mute").toInt() != 0; audio_set_muted(g_muted); }
+    if (g_web.hasArg("mute")) { g_muted = g_web.arg("mute").toInt() != 0; audio_set_muted(g_muted || g_night); }
     if (g_web.hasArg("save")) {
         Preferences p;
         p.begin("capsuleradar", false);
@@ -1361,6 +1540,9 @@ static int deviceSettingGet(int id) {
         case UI_SET_GPS:        return g_useGps ? 1 : 0;
         case UI_SET_MAP:        return g_mapMode;
         case UI_SET_QUOTE:      return g_quoteOn ? 1 : 0;
+        case UI_SET_OVERHEAD:   return g_overheadOn ? 1 : 0;
+        case UI_SET_ISS:        return g_issOn ? 1 : 0;
+        case UI_SET_NIGHT:      return g_nightMode;
         default:                return 0;
     }
 }
@@ -1377,7 +1559,7 @@ static void deviceSettingSet(int id, int v, bool save) {
             if (v == 1 && !BOARD_HAS_BUZZER) g_volume = SOUND_QUIET;
             if (v == 2)                      g_volume = SOUND_LOUD;
             audio_set_volume(g_volume);
-            audio_set_muted(g_muted);
+            audio_set_muted(g_muted || g_night);   // night mode keeps it quiet until morning
             nvsPutInt("vol", g_volume);
             nvsPutBool("mute", g_muted);
             if (!g_muted) audio_play(AUDIO_NEW);   // hear the new level
@@ -1440,6 +1622,18 @@ static void deviceSettingSet(int id, int v, bool save) {
         case UI_SET_QUOTE:
             g_quoteOn = v != 0;
             nvsPutBool("quote", g_quoteOn);
+            break;
+        case UI_SET_OVERHEAD:
+            g_overheadOn = v != 0;
+            nvsPutBool("overhead", g_overheadOn);
+            break;
+        case UI_SET_ISS:
+            g_issOn = v != 0;
+            nvsPutBool("iss", g_issOn);
+            break;
+        case UI_SET_NIGHT:
+            g_nightMode = constrain(v, 0, 3);
+            nvsPutInt("night", g_nightMode);
             break;
         case UI_SET_MAP:
             g_mapMode = constrain(v, 0, 2);       // loop() re-tints / hides; core 0 loads tiles only when on
@@ -1706,7 +1900,9 @@ void setup() {
     g_cartoKey.trim();
     map_client_set_carto_key(g_cartoKey.c_str());
     map_bg_set_source(g_cartoKey.length() ? MAP_SRC_CARTO : MAP_SRC_OSM);   // no key: OpenStreetMap
-    user_photo_begin();   // LittleFS + first decode of the own photo (on core 0, once adsb_task runs)
+    user_photo_begin();   // LittleFS + first decode
+    dayLoad();            // today's records survive a restart (LittleFS is up now)
+    dayPublish(); of the own photo (on core 0, once adsb_task runs)
 
     float queryKm = queryRadiusKm();
     g_queryLat = g_settings.homeLat; g_queryLon = g_settings.homeLon;
@@ -1876,6 +2072,8 @@ void loop() {
             g_acDirty = false;         // g_aircraft now holds the previous snapshot (overwritten next poll)
             xSemaphoreGive(g_ac_mutex);
             followTick();                          // following a plane: maybe move the centre to it
+            overheadTick();                        // "Gerade über dir"
+            dayTick();                             // today's records
             radar::update(g_snap, viewSettings()); // rebuild the glyph/trail layer
             ui_on_data_updated();              // refresh card/list/stats
             checkAudioEvents();                // ping new-in-range / emergency / military
@@ -1917,6 +2115,8 @@ void loop() {
             char date[20];
             strftime(date, sizeof(date), "%d.%m.%Y", &ti);   // z. B. "08.06.2026"
             ui_set_date(date);
+            nightTick(ti);
+            issTick();
             // Spruch des Tages: once a day, until OK. Not during the boot splash.
             const long today = (long)(ti.tm_year + 1900) * 10000L + (ti.tm_mon + 1) * 100L + ti.tm_mday;
             if (g_quoteOn && today != g_quoteDone && today != g_quoteShowing && ti.tm_year >= 125 &&
