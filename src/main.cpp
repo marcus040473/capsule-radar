@@ -288,7 +288,7 @@ static void adsb_task(void*) {
             }
             // Amtliche Warnungen des DWD für den Standort (nur in Deutschland)
             if ((int32_t)(nowMs - nextWarnAt) >= 0) {
-                if (!dwd_in_germany(g_settings.homeLat, g_settings.homeLon)) {
+                if (!dwd_point_in_germany(g_settings.homeLat, g_settings.homeLon)) {
                     nextWarnAt = millis() + DWD_WARN_REFRESH_MS;
                 } else {
                     WeatherWarnings wn;

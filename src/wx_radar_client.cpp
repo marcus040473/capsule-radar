@@ -50,10 +50,18 @@ static int radar_png_line(PNGDRAW *draw) {
             line[x] = veil ? 0 : (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
         }
     } else if (draw->iPixelType == PNG_PIXEL_TRUECOLOR_ALPHA && draw->iBpp == 8) {
+        // Honour the alpha channel: the DWD's RGBA frames are (255,255,255,0) wherever there is
+        // no rain -- ignoring alpha painted the whole radar white (1.8.0-de15).
         const uint8_t *src = draw->pPixels;
-        for (int x = 0; x < draw->iWidth; ++x, src += 4) {
-            line[x] = (uint16_t)((src[2] >> 3) | ((src[1] >> 2) << 5) |
-                                 ((src[0] >> 3) << 11));
+        for (int x = 0; x < draw->iWidth && x < WX_RADAR_SOURCE_SIZE; ++x, src += 4) {
+            const uint8_t r = src[0], g = src[1], b = src[2], a = src[3];
+            bool drop = a < 128;
+            if (s_dwdMode) {
+                drop = a < 160 || (r > 200 && g < 60 && b > 200);   // no-data veil / border
+                if (draw->y == WX_RADAR_SOURCE_SIZE / 2 && x == WX_RADAR_SOURCE_SIZE / 2)
+                    s_centerNoData = a > 20 && a < 160 && abs(r - g) < 12 && abs(g - b) < 12;
+            }
+            line[x] = drop ? 0 : (uint16_t)((b >> 3) | ((g >> 2) << 5) | ((r >> 3) << 11));
         }
     } else {
         s_png->getLineAsRGB565(draw, line, PNG_RGB565_LITTLE_ENDIAN, 0x00000000);
@@ -146,7 +154,7 @@ static bool dwd_radar_fetch(double lat, double lon) {
 
 bool wx_radar_fetch(double lat, double lon) {
     if (WiFi.status() != WL_CONNECTED || !wx_radar_back_buffer() || !ensure_decoder()) return false;
-    if (dwd_in_germany(lat, lon)) {
+    if (dwd_point_in_germany(lat, lon)) {          // the DWD radar covers Germany (and a bit more)
         if (dwd_radar_fetch(lat, lon)) return true;
         Serial.println("[wxradar] DWD radar unavailable here -> RainViewer");
     }

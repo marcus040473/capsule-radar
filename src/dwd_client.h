@@ -10,5 +10,8 @@
 bool dwd_weather_fetch(double lat, double lon, WeatherSnapshot &out);
 bool dwd_warnings_fetch(double lat, double lon, WeatherWarnings &out);
 
-// Liegt der Ort im Bereich des deutschen Radarverbunds / der DWD-Warnungen?
+// Grobe Vorprüfung (Rechteck um Deutschland), ohne Netz.
 bool dwd_in_germany(double lat, double lon);
+// Liegt der Ort wirklich in Deutschland (DWD-Warngebiet einer Gemeinde)? Einmal beim DWD
+// nachgefragt und für den Ort gemerkt; ohne Antwort zählt das Rechteck. Kern 0.
+bool dwd_point_in_germany(double lat, double lon);

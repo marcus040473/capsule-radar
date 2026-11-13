@@ -17,6 +17,31 @@ bool dwd_in_germany(double lat, double lon) {
     return lat > 47.0 && lat < 55.3 && lon > 5.6 && lon < 15.3;
 }
 
+bool dwd_point_in_germany(double lat, double lon) {
+    static double cLat = 999, cLon = 999;
+    static bool cIn = false;
+    if (!dwd_in_germany(lat, lon)) return false;
+    if (fabs(lat - cLat) < 0.005 && fabs(lon - cLon) < 0.005) return cIn;
+    char url[360];
+    snprintf(url, sizeof(url),
+             "https://maps.dwd.de/geoserver/dwd/ows?service=WFS&version=2.0.0&request=GetFeature"
+             "&typeName=dwd:Warngebiete_Gemeinden&outputFormat=application/json&propertyName=NAME&count=1"
+             "&CQL_FILTER=INTERSECTS(SHAPE,POINT(%.5f%%20%.5f))", lat, lon);
+    uint8_t *buf = nullptr; size_t len = 0;
+    if (!net_fetch_psram(url, ADSB_USER_AGENT, &buf, &len, 8000, 3500, 7000)) return true;   // ask again next time
+    const char *k = "\"numberMatched\":";
+    const char *p = nullptr;
+    for (size_t i = 0; i + strlen(k) < len; ++i)
+        if (!memcmp(buf + i, k, strlen(k))) { p = (const char *)buf + i + strlen(k); break; }
+    const bool known = p != nullptr;
+    const bool in = known && atoi(p) > 0;
+    heap_caps_free(buf);
+    if (!known) return true;
+    cLat = lat; cLon = lon; cIn = in;
+    Serial.printf("[dwd] %.4f, %.4f is %s Germany\n", lat, lon, in ? "in" : "outside");
+    return in;
+}
+
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 
