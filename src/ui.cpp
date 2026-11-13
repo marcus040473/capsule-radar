@@ -1638,6 +1638,11 @@ static bool   s_issCoastOk = false;
 static lv_obj_t *s_issLayer = nullptr, *s_issInfo = nullptr, *s_issStatus = nullptr, *s_issScale = nullptr;
 static const int ISS_CX = SCREEN_W / 2, ISS_CY = SCREEN_H / 2 - 4, ISS_R = 186;
 
+int ui_weather_view(void) {
+    if (!s_tv || !s_tileWeather || lv_tileview_get_tile_act(s_tv) != s_tileWeather) return -1;
+    return s_weatherMode == WEATHER_RADAR ? 0 : (s_weatherMode == WEATHER_CLOUDS ? 1 : 2);
+}
+
 bool ui_iss_view_active(void) { return s_tv && s_tileIss && lv_tileview_get_tile_act(s_tv) == s_tileIss; }
 
 // lat/lon -> screen (azimuthal equidistant around home, like the radar). false: beyond the rim

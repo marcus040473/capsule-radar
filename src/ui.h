@@ -75,6 +75,9 @@ void ui_show_toast(const char *title, const char *text, uint32_t ms, const char 
 void ui_set_iss_home(double lat, double lon);                       // Mittelpunkt (eigener Standort)
 void ui_set_iss(double lat, double lon, float altKm, float velKmh, bool sunlit, bool darkAtHome);
 void ui_set_iss_track(const float *lat, const float *lon, int n);  // Bahn (Vergangenheit -> Zukunft)
+// Welche Wetteransicht ist zu sehen? -1 keine (andere Seite), 0 Regenradar, 1 Wolken, 2 Vorhersage.
+// main.cpp holt Radar- und Wolkenbilder nur, solange ihre Ansicht offen ist.
+int ui_weather_view(void);
 bool ui_iss_view_active(void);                                      // die Seite ist gerade zu sehen
 void ui_set_day_stats(int count, float maxAltFt, const char *altCall, float maxGsKt, const char *gsCall,
                       float minDistKm, const char *distCall);

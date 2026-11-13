@@ -130,6 +130,7 @@ static volatile int          g_wxKm = WX_ZOOM_DEFAULT_KM;            // Regenrad
 static int                   g_battOff = BATT_OFF_DEFAULT;           // Bildschirm aus (Akku): Index (NVS "battoff")
 static bool                  g_battDark = false;                     // screen off by the battery saver
 static volatile bool         g_wxRefetch = false;                    // zoom changed: fetch the radar now
+static volatile int          g_wxView = -1;                          // ui_weather_view(), set on core 1
 static volatile bool         g_wxRadarDirty = false;
 static volatile bool         g_cloudImageDirty = false;
 
@@ -307,8 +308,10 @@ static void adsb_task(void*) {
                     }
                 }
             }
+            // Regenradar und Wolkenbild nur, solange ihre Ansicht offen ist (spart WLAN, Rechenzeit
+            // und Akku); beim Öffnen sofort, wenn das letzte Bild älter als das Intervall ist.
             if (g_wxRefetch) { g_wxRefetch = false; nextWxRadarAt = nowMs; }   // new zoom step
-            if ((int32_t)(nowMs - nextWxRadarAt) >= 0) {
+            if (g_wxView == 0 && (int32_t)(nowMs - nextWxRadarAt) >= 0) {
                 Serial.println("[wxradar] fetching latest frame...");
                 if (wx_radar_fetch(g_settings.homeLat, g_settings.homeLon, g_wxKm)) {
                     g_wxRadarDirty = true;
@@ -318,7 +321,7 @@ static void adsb_task(void*) {
                     Serial.println("[wxradar] fetch failed; retrying in 60s");
                 }
             }
-            if ((int32_t)(nowMs - nextCloudImageAt) >= 0) {
+            if (g_wxView == 1 && (int32_t)(nowMs - nextCloudImageAt) >= 0) {
                 Serial.println("[clouds] fetching EUMETSAT frame...");
                 if (cloud_image_fetch(g_settings.homeLat, g_settings.homeLon)) {
                     g_cloudImageDirty = true;
@@ -2314,6 +2317,7 @@ void loop() {
         ui_on_data_updated();
     }
     issPageTick();                             // ISS page: new position / orbit track
+    g_wxView = ui_weather_view();              // core 0 fetches radar/cloud images only while shown
 
     // periodic: HUD clock + wifi/battery indicators
     static uint32_t lastStatus = 0;
