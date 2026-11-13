@@ -36,6 +36,12 @@
 > besondere Grüße. Abschaltbar in den Einstellungen. Name/Adresse: `lisasradar.local`,
 > Einrichtungs-WLAN `LisasRadar-Setup` (`DEVICE_HOSTNAME`, `SETUP_AP_NAME` in `config.h`).
 >
+> **ISS-Seite:** vom Wetter aus noch einmal nach links wischen. Ein stark herausgezoomtes
+> Radar (3.000 km, Tippen: 9.000 km) mit dem eigenen Standort in der Mitte, Küstenlinien,
+> der Bahn der ISS (20 min zurück, 25 min voraus), dem Sichtkreis (dort steht sie mehr als
+> 10° über dem Horizont) und der ISS selbst; ist sie weiter weg, zeigt ein Pfeil am Rand in
+> ihre Richtung. Daten von api.wheretheiss.at, nur solange die Seite offen ist.
+>
 > **Karte:** unter dem Radar liegt eine OpenStreetMap-Karte (© OpenStreetMap-Mitwirkende),
 > auf dunkel umgerechnet und in der Designfarbe eingefärbt. Ohne weitere Einrichtung kommt sie
 > von tile.openstreetmap.org (kein Schlüssel nötig). Wer die dunkle CARTO-Karte möchte, trägt

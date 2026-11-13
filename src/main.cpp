@@ -321,7 +321,7 @@ static void adsb_task(void*) {
             char wantHex[10];
             if (photo_pending(wantHex, sizeof(wantHex))) photo_fetch(wantHex);
             map_client_service(g_mapMode > 0);   // map under the radar: at most one tile per pass
-            iss_service();                         // ISS position, only after dark
+            iss_service();                         // ISS: page shown, or after dark for the hint
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -546,15 +546,66 @@ static void dayTick() {                             // each snapshot
 }
 
 // ---- ISS: ein sichtbarer Überflug (Kern 0 holt die Position, Kern 1 zeigt den Hinweis) ----
+// und die ISS-Seite: solange sie zu sehen ist, alle ISS_PAGE_POLL_MS eine frische Position
+// (Tag und Nacht) und alle ISS_TRACK_MS die Bahn (20 min zurück bis 25 min voraus).
 static volatile bool  g_issNew = false;             // core 0 -> core 1: a fresh, visible position
 static volatile float g_issElev = 0, g_issBearing = 0;
+static volatile bool  g_issPage = false;            // core 1 -> core 0: the ISS page is shown
+static portMUX_TYPE   g_issMux = portMUX_INITIALIZER_UNLOCKED;
+struct IssPos { double lat, lon; float alt, vel; bool sunlit, dark; };
+static IssPos         g_issPos;                     // guarded by g_issMux
+static volatile uint32_t g_issPosSeq = 0;
+static float          g_issTrkLat[ISS_TRACK_POINTS], g_issTrkLon[ISS_TRACK_POINTS];   // g_issMux
+static volatile int   g_issTrkN = 0;
+static volatile uint32_t g_issTrkSeq = 0;
+
+static void iss_fetch_track() {                      // core 0
+    const time_t now = time(nullptr);
+    char url[300];
+    int n = snprintf(url, sizeof(url), "https://api.wheretheiss.at/v1/satellites/25544/positions?timestamps=");
+    for (int i = 0; i < ISS_TRACK_POINTS; ++i)
+        n += snprintf(url + n, sizeof(url) - n, "%s%ld", i ? "," : "",
+                      (long)(now + (i * ISS_TRACK_STEP_S) - ISS_TRACK_PAST_S));
+    uint8_t *buf = nullptr; size_t len = 0;
+    if (!net_fetch_psram(url, ADSB_USER_AGENT, &buf, &len, 16384, 3500, 8000)) return;
+    JsonDocument doc;
+    const bool ok = !deserializeJson(doc, (const char *)buf, len);
+    heap_caps_free(buf);
+    if (!ok || !doc.is<JsonArray>()) return;
+    float la[ISS_TRACK_POINTS], lo[ISS_TRACK_POINTS];
+    int k = 0;
+    for (JsonObject o : doc.as<JsonArray>()) {
+        if (k >= ISS_TRACK_POINTS) break;
+        if (!o["latitude"].is<double>()) continue;
+        la[k] = o["latitude"].as<float>(); lo[k] = o["longitude"].as<float>(); ++k;
+    }
+    if (k < 2) return;
+    portENTER_CRITICAL(&g_issMux);
+    memcpy(g_issTrkLat, la, sizeof(float) * k);
+    memcpy(g_issTrkLon, lo, sizeof(float) * k);
+    g_issTrkN = k;
+    portEXIT_CRITICAL(&g_issMux);
+    g_issTrkSeq = g_issTrkSeq + 1;
+}
+
 static void iss_service() {                          // core 0 (adsb_task), WiFi up
-    static uint32_t nextMs = 0;
-    if (!g_issOn || (int32_t)(millis() - nextMs) < 0) return;
-    nextMs = millis() + 90000UL;
+    static uint32_t nextMs = 0, nextTrackMs = 0;
+    static bool wasPage = false;
+    const bool page = g_issPage;
+    if (page && !wasPage) { nextMs = 0; nextTrackMs = 0; }   // page just opened: fetch now
+    wasPage = page;
+    if (!page && !g_issOn) return;
     const time_t now = time(nullptr);
     if (now < 1700000000L) return;                   // no clock yet
-    if (sky::sunElevationDeg(g_settings.homeLat, g_settings.homeLon, now) > ISS_SUN_BELOW_DEG) {
+    if (page && (int32_t)(millis() - nextTrackMs) >= 0) {
+        nextTrackMs = millis() + ISS_TRACK_MS;
+        iss_fetch_track();
+        return;                                       // one request per pass, be polite
+    }
+    if ((int32_t)(millis() - nextMs) < 0) return;
+    nextMs = millis() + (page ? ISS_PAGE_POLL_MS : 90000UL);
+    const bool dark = sky::sunElevationDeg(g_settings.homeLat, g_settings.homeLon, now) <= ISS_SUN_BELOW_DEG;
+    if (!dark && !page) {
         nextMs = millis() + 5UL * 60UL * 1000UL;     // daylight: you could not see it anyway
         return;
     }
@@ -566,13 +617,41 @@ static void iss_service() {                          // core 0 (adsb_task), WiFi
     heap_caps_free(buf);
     if (!ok) return;
     const double lat = doc["latitude"] | 0.0, lon = doc["longitude"] | 0.0, alt = doc["altitude"] | 420.0;
+    const double vel = doc["velocity"] | 27600.0;
     const bool sunlit = strcmp(doc["visibility"] | "", "daylight") == 0;   // the ISS itself in sunlight
     const double elev = sky::elevationDeg(g_settings.homeLat, g_settings.homeLon, lat, lon, alt);
-    if (elev > -15.0) nextMs = millis() + 20000UL;   // close: look again soon, a pass lasts minutes
+    portENTER_CRITICAL(&g_issMux);
+    g_issPos = { lat, lon, (float)alt, (float)vel, sunlit, dark };
+    portEXIT_CRITICAL(&g_issMux);
+    g_issPosSeq = g_issPosSeq + 1;
+    if (!g_issOn || !dark) return;                   // the "ISS sichtbar!" hint: only after dark
+    if (!page && elev > -15.0) nextMs = millis() + 20000UL;   // close: look again soon, a pass lasts minutes
     if (sunlit && elev >= ISS_MIN_ELEV_DEG) {
         g_issElev = (float)elev;
         g_issBearing = (float)sky::bearingDeg(g_settings.homeLat, g_settings.homeLon, lat, lon);
         g_issNew = true;
+    }
+}
+static void issPageTick() {                          // core 1 (loop): feed the ISS page
+    static uint32_t seenPos = 0, seenTrk = 0;
+    g_issPage = ui_iss_view_active();
+    if (seenPos != g_issPosSeq) {
+        seenPos = g_issPosSeq;
+        portENTER_CRITICAL(&g_issMux);
+        const IssPos p = g_issPos;
+        portEXIT_CRITICAL(&g_issMux);
+        ui_set_iss_home(g_settings.homeLat, g_settings.homeLon);
+        ui_set_iss(p.lat, p.lon, p.alt, p.vel, p.sunlit, p.dark);
+    }
+    if (seenTrk != g_issTrkSeq) {
+        seenTrk = g_issTrkSeq;
+        float la[ISS_TRACK_POINTS], lo[ISS_TRACK_POINTS];
+        portENTER_CRITICAL(&g_issMux);
+        const int n = g_issTrkN;
+        memcpy(la, g_issTrkLat, sizeof(float) * n);
+        memcpy(lo, g_issTrkLon, sizeof(float) * n);
+        portEXIT_CRITICAL(&g_issMux);
+        ui_set_iss_track(la, lo, n);
     }
 }
 static void issTick() {                              // core 1 (loop)
@@ -1784,7 +1863,7 @@ void setup() {
         // remembering it; NVS write only when the view actually changes.
         ui_show_view(g_lastView);
         ui_set_view_changed_cb([](int idx) {
-            if (idx >= 4) return;   // settings and photo pages are never the start view after a reboot
+            if (idx >= 4) return;   // settings, photo and ISS pages are never the start view after a reboot
             if (idx == g_lastView) return;
             g_lastView = idx;
             Preferences q;
@@ -2091,6 +2170,7 @@ void loop() {
         g_cloudImageDirty = false;
         ui_on_data_updated();
     }
+    issPageTick();                             // ISS page: new position / orbit track
 
     // periodic: HUD clock + wifi/battery indicators
     static uint32_t lastStatus = 0;

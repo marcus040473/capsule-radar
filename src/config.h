@@ -1,7 +1,7 @@
 #pragma once
 // Capsule Radar — build & user configuration.
 
-#define FW_VERSION "1.8.0-de11"   // deutsche Version; shown on the web config page + Stats screen; bump on release
+#define FW_VERSION "1.8.0-de12"   // deutsche Version; shown on the web config page + Stats screen; bump on release
 
 // Überschrift der Einstellungen-Seite am Gerät (links vom Radar).
 #define UI_SETTINGS_TITLE "LISAS EINSTELLUNGEN"
@@ -30,6 +30,14 @@
 // ISS: Hinweis, wenn sie von der Sonne beschienen mindestens ISS_MIN_ELEV_DEG über dem Horizont
 // steht, während es am Standort dunkel ist (Sonne tiefer als ISS_SUN_BELOW_DEG).
 #define ISS_MIN_ELEV_DEG     10.0
+// ISS-Seite: Position alle ISS_PAGE_POLL_MS, Bahn (ISS_TRACK_POINTS Punkte im Abstand von
+// ISS_TRACK_STEP_S, beginnend ISS_TRACK_PAST_S in der Vergangenheit) alle ISS_TRACK_MS.
+// wheretheiss.at erlaubt höchstens 10 Zeitpunkte pro Anfrage und ~1 Anfrage pro Sekunde.
+#define ISS_PAGE_POLL_MS     5000UL
+#define ISS_TRACK_MS         (4UL * 60UL * 1000UL)
+#define ISS_TRACK_POINTS     10
+#define ISS_TRACK_STEP_S     300
+#define ISS_TRACK_PAST_S     1200
 #define ISS_SUN_BELOW_DEG    (-6.0)
 #define ISS_REPEAT_MS        (15UL * 60UL * 1000UL)
 // Name des Geräts auf Webseite, Update-Seite, WLAN-Portal und Statistik-Seite.

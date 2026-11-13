@@ -10,6 +10,9 @@
 #include "airports.h"
 #include "config.h"
 #include "map_bg.h"
+#include "coastline.h"
+#include "geo.h"
+#include "sky.h"
 #include <lvgl.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -28,6 +31,9 @@ static lv_obj_t *s_tv = nullptr;
 static lv_obj_t *s_tileRadar = nullptr, *s_tileList = nullptr, *s_tileStats = nullptr, *s_tileWeather = nullptr;
 static lv_obj_t *s_tileSettings = nullptr;   // links vom Radar (Spalte 1); das Radar sitzt in Spalte 2
 static lv_obj_t *s_tilePhoto = nullptr;      // Spalte 0, ganz links: die Foto-Seite (siehe "photo")
+static lv_obj_t *s_tileIss = nullptr;        // Spalte 6, ganz rechts: die ISS-Seite (siehe "iss")
+static void iss_open(void);
+static void iss_close(void);
 static lv_obj_t *s_card = nullptr, *s_cardTitle = nullptr, *s_cardL = nullptr, *s_cardR = nullptr;
 static lv_obj_t *s_cardRoute = nullptr;
 static lv_obj_t *s_photo = nullptr, *s_photoCredit = nullptr;   // aircraft photo above the card
@@ -955,6 +961,7 @@ static int active_view_index(void) {
     if (act == s_tileWeather) return 3;
     if (act == s_tileSettings) return 4;
     if (act == s_tilePhoto)    return 5;
+    if (act == s_tileIss)      return 6;
     return 0;
 }
 
@@ -965,6 +972,7 @@ static void refresh_active_tile(void) {
     else if (act == s_tileStats) build_stats();
     else if (act == s_tileWeather) build_weather();
     else if (act == s_tileSettings) ui_settings_refresh();
+    else if (act == s_tileIss) iss_open();
 }
 
 void ui_on_data_updated(void) {
@@ -1552,6 +1560,272 @@ static void build_settings(void) {
     make_tile_title(s_setPanel, UI_SETTINGS_TITLE);
 }
 
+
+// ----------------------------------------------------------------------- iss
+// ISS-Seite: ein stark herausgezoomtes Radar (3.000 oder 9.000 km), der eigene Standort in
+// der Mitte, Küsten als feine Linien, die Bahn der ISS (20 min zurück, 25 min voraus), der
+// Sichtkreis (dort steht sie > 10° über dem Horizont) und die ISS selbst -- weiter weg als der
+// Rand: ein Pfeil am Rand in ihre Richtung. Daten kommen aus main.cpp (wheretheiss.at).
+// Die Küstenlinien werden nur projiziert, solange die Seite zu sehen ist.
+static const float ISS_RANGES[2] = { 3000.0f, 9000.0f };
+static int    s_issRangeIdx = 0;
+static double s_issHomeLat = 0, s_issHomeLon = 0;
+static bool   s_issHave = false, s_issSunlit = false, s_issDark = false;
+static double s_issLat = 0, s_issLon = 0;
+static float  s_issAlt = 420, s_issVel = 0;
+static std::vector<std::pair<float, float>> s_issTrack;   // lat, lon
+static size_t s_issNowIdx = 0;                              // track point nearest the ISS now
+static CoastLines s_issCoast;
+static bool   s_issCoastOk = false;
+static lv_obj_t *s_issLayer = nullptr, *s_issInfo = nullptr, *s_issStatus = nullptr, *s_issScale = nullptr;
+static const int ISS_CX = SCREEN_W / 2, ISS_CY = SCREEN_H / 2 - 4, ISS_R = 186;
+
+bool ui_iss_view_active(void) { return s_tv && s_tileIss && lv_tileview_get_tile_act(s_tv) == s_tileIss; }
+
+// lat/lon -> screen (azimuthal equidistant around home, like the radar). false: beyond the rim
+static bool iss_proj(double lat, double lon, lv_point_t *p, float *distKm = nullptr, float *brg = nullptr) {
+    const double d = geo::haversineKm(s_issHomeLat, s_issHomeLon, lat, lon);
+    const double b = geo::bearingDeg(s_issHomeLat, s_issHomeLon, lat, lon);
+    if (distKm) *distKm = (float)d;
+    if (brg) *brg = (float)b;
+    const double rng = ISS_RANGES[s_issRangeIdx];
+    const double r = (d > rng ? rng : d) / rng * ISS_R;
+    const double a = b * M_PI / 180.0;
+    p->x = (lv_coord_t)lround(ISS_CX + r * sin(a));
+    p->y = (lv_coord_t)lround(ISS_CY - r * cos(a));
+    return d <= rng;
+}
+
+// ground distance at which a satellite at altKm stands minElev above the horizon
+static float iss_vis_radius_km(float altKm, float minElev) {
+    float lo = 0, hi = 4000;
+    for (int i = 0; i < 30; ++i) {
+        const float mid = (lo + hi) / 2;
+        const double e = sky::elevationDeg(0, 0, mid / 111.195, 0, altKm);
+        if (e > minElev) lo = mid; else hi = mid;
+    }
+    return lo;
+}
+
+static void iss_text(void) {
+    if (!s_issInfo || !s_issStatus) return;
+    char scale[64];
+    snprintf(scale, sizeof(scale), "Ring = %.0f km  \xC2\xB7  Tippen: Zoom", ISS_RANGES[s_issRangeIdx] / 3.0f);
+    if (s_issScale) lv_label_set_text(s_issScale, scale);
+    if (!s_issHave) {
+        lv_label_set_text(s_issInfo, "");
+        lv_label_set_text(s_issStatus, "Lade ISS-Position...");
+        lv_obj_set_style_text_color(s_issStatus, UI_DIM, 0);
+        return;
+    }
+    lv_point_t p; float d = 0, b = 0;
+    iss_proj(s_issLat, s_issLon, &p, &d, &b);
+    const double elev = sky::elevationDeg(s_issHomeLat, s_issHomeLon, s_issLat, s_issLon, s_issAlt);
+    char info[96];
+    snprintf(info, sizeof(info), "%.0f km entfernt  \xC2\xB7  %.0f km hoch\n%.0f km/h", d, s_issAlt, s_issVel);
+    lv_label_set_text(s_issInfo, info);
+    char st[96];
+    lv_color_t col = UI_DIM;
+    if (elev >= ISS_MIN_ELEV_DEG && s_issSunlit && s_issDark) {
+        snprintf(st, sizeof(st), "Jetzt sichtbar! Richtung %s, %d\xC2\xB0 hoch", sky::compassWord(b), (int)lround(elev));
+        col = UI_GREEN;
+    } else if (elev > 0) {
+        snprintf(st, sizeof(st), "\xC3\x9C" "ber dem Horizont \xE2\x80\x93 %s", !s_issDark ? "aber es ist hell" : "aber im Erdschatten");
+        col = lv_color_hex(0xFFB23C);
+    } else {
+        snprintf(st, sizeof(st), "Unter dem Horizont (Richtung %s)", sky::compassWord(b));
+    }
+    lv_label_set_text(s_issStatus, st);
+    lv_obj_set_style_text_color(s_issStatus, col, 0);
+}
+
+static void iss_draw_cb(lv_event_t *e) {
+    lv_draw_ctx_t *d = lv_event_get_draw_ctx(e);
+    const lv_point_t c = { (lv_coord_t)ISS_CX, (lv_coord_t)ISS_CY };
+    const float rng = ISS_RANGES[s_issRangeIdx];
+    // coastline (projected while the page is shown)
+    coastline_draw_lines(d, s_issCoast, lv_color_hex(0x3D6E9E), 200, 1);
+    // range rings (thirds)
+    lv_draw_arc_dsc_t ad;
+    lv_draw_arc_dsc_init(&ad);
+    ad.color = UI_GREEN; ad.width = 1;
+    for (int i = 1; i <= 3; ++i) { ad.opa = i == 3 ? 110 : 60; lv_draw_arc(d, &ad, &c, (uint16_t)(ISS_R * i / 3), 0, 360); }
+    // visibility circle, dashed: inside it the ISS stands > 10 deg above the horizon
+    const float vr = iss_vis_radius_km(s_issAlt, ISS_MIN_ELEV_DEG) / rng * ISS_R;
+    if (vr < ISS_R) {
+        ad.color = lv_color_hex(0xFFB23C); ad.opa = 150;
+        for (int a = 0; a < 360; a += 8) lv_draw_arc(d, &ad, &c, (uint16_t)vr, a, a + 4);
+    }
+    // home
+    lv_draw_rect_dsc_t hd;
+    lv_draw_rect_dsc_init(&hd);
+    hd.bg_color = UI_INK; hd.radius = LV_RADIUS_CIRCLE;
+    const lv_area_t ha = { (lv_coord_t)(c.x - 3), (lv_coord_t)(c.y - 3), (lv_coord_t)(c.x + 3), (lv_coord_t)(c.y + 3) };
+    lv_draw_rect(d, &hd, &ha);
+    // orbit track: a line through the points inside the rim
+    lv_draw_line_dsc_t ld;
+    lv_draw_line_dsc_init(&ld);
+    ld.color = lv_color_hex(0x3CE0FF); ld.width = 2; ld.opa = 170; ld.round_start = ld.round_end = 1;
+    lv_point_t prev; bool havePrev = false;
+    for (size_t i = 0; i < s_issTrack.size(); ++i) {
+        lv_point_t q;
+        const bool in = iss_proj(s_issTrack[i].first, s_issTrack[i].second, &q);
+        ld.opa = (s_issHave && i <= s_issNowIdx) ? 80 : 190;      // flown: faint; ahead: bright
+        if (in && havePrev) lv_draw_line(d, &ld, &prev, &q);
+        prev = q; havePrev = in;
+    }
+    if (!s_issHave) return;
+    lv_point_t p; float dist = 0, brg = 0;
+    const bool in = iss_proj(s_issLat, s_issLon, &p, &dist, &brg);
+    if (in) {
+        // the station: a glow, a body and two solar wings
+        lv_draw_rect_dsc_t g;
+        lv_draw_rect_dsc_init(&g);
+        g.bg_color = lv_color_hex(0x3CE0FF); g.bg_opa = 60; g.radius = LV_RADIUS_CIRCLE;
+        const lv_area_t ga = { (lv_coord_t)(p.x - 14), (lv_coord_t)(p.y - 14), (lv_coord_t)(p.x + 14), (lv_coord_t)(p.y + 14) };
+        lv_draw_rect(d, &g, &ga);
+        g.bg_opa = LV_OPA_COVER; g.radius = 1;
+        g.bg_color = lv_color_hex(0xFFFFFF);
+        const lv_area_t body = { (lv_coord_t)(p.x - 3), (lv_coord_t)(p.y - 3), (lv_coord_t)(p.x + 3), (lv_coord_t)(p.y + 3) };
+        lv_draw_rect(d, &g, &body);
+        g.bg_color = lv_color_hex(0x3CE0FF);
+        const lv_area_t w1 = { (lv_coord_t)(p.x - 12), (lv_coord_t)(p.y - 2), (lv_coord_t)(p.x - 5), (lv_coord_t)(p.y + 2) };
+        const lv_area_t w2 = { (lv_coord_t)(p.x + 5),  (lv_coord_t)(p.y - 2), (lv_coord_t)(p.x + 12), (lv_coord_t)(p.y + 2) };
+        lv_draw_rect(d, &g, &w1);
+        lv_draw_rect(d, &g, &w2);
+        lv_draw_label_dsc_t l;
+        lv_draw_label_dsc_init(&l);
+        l.font = F12(); l.color = lv_color_hex(0x3CE0FF);
+        const lv_area_t la = { (lv_coord_t)(p.x + 14), (lv_coord_t)(p.y - 20), (lv_coord_t)(p.x + 60), (lv_coord_t)(p.y - 6) };
+        lv_draw_label(d, &l, &la, "ISS", NULL);
+    } else {
+        // beyond the rim: an arrow on the rim pointing its way + the distance
+        const float a = brg * (float)M_PI / 180.0f, s = sinf(a), co = cosf(a);
+        const float r0 = ISS_R - 4.0f;
+        lv_point_t tri[3] = {
+            { (lv_coord_t)(ISS_CX + (r0 + 10) * s), (lv_coord_t)(ISS_CY - (r0 + 10) * co) },
+            { (lv_coord_t)(ISS_CX + r0 * s + 7 * co), (lv_coord_t)(ISS_CY - r0 * co + 7 * s) },
+            { (lv_coord_t)(ISS_CX + r0 * s - 7 * co), (lv_coord_t)(ISS_CY - r0 * co - 7 * s) } };
+        lv_draw_rect_dsc_t g;
+        lv_draw_rect_dsc_init(&g);
+        g.bg_color = lv_color_hex(0x3CE0FF);
+        lv_draw_polygon(d, &g, tri, 3);
+        char b[24];
+        snprintf(b, sizeof(b), "ISS %.0f km", dist);
+        lv_draw_label_dsc_t l;
+        lv_draw_label_dsc_init(&l);
+        l.font = F12(); l.color = lv_color_hex(0x3CE0FF); l.align = LV_TEXT_ALIGN_CENTER;
+        const int lx = (int)(ISS_CX + (r0 - 30) * s), ly = (int)(ISS_CY - (r0 - 30) * co);
+        const lv_area_t la = { (lv_coord_t)(lx - 50), (lv_coord_t)(ly - 8), (lv_coord_t)(lx + 50), (lv_coord_t)(ly + 8) };
+        lv_draw_label(d, &l, &la, b, NULL);
+    }
+}
+
+static void iss_project_coast(void) {
+    coastline_project_into(s_issCoast, s_issHomeLat, s_issHomeLon, ISS_RANGES[s_issRangeIdx],
+                           (float)ISS_CX, (float)ISS_CY, (float)ISS_R, 3);
+    s_issCoastOk = true;
+}
+
+static void iss_open(void) {                     // page shown (or refreshed while shown)
+    if (!s_issCoastOk) iss_project_coast();
+    iss_text();
+    if (s_issLayer) lv_obj_invalidate(s_issLayer);
+}
+
+static void iss_close(void) {                    // page left: give the coastline's RAM back
+    if (!s_issCoastOk) return;
+    s_issCoast.release();
+    s_issCoastOk = false;
+}
+
+static void iss_find_now(void) {                // which track point is "now" (past/future split)
+    double best = 1e9;
+    for (size_t i = 0; i < s_issTrack.size(); ++i) {
+        const double dd = geo::haversineKm(s_issLat, s_issLon, s_issTrack[i].first, s_issTrack[i].second);
+        if (dd < best) { best = dd; s_issNowIdx = i; }
+    }
+}
+
+void ui_set_iss_home(double lat, double lon) {
+    if (lat == s_issHomeLat && lon == s_issHomeLon) return;
+    s_issHomeLat = lat; s_issHomeLon = lon;
+    if (s_issCoastOk) { iss_project_coast(); if (s_issLayer) lv_obj_invalidate(s_issLayer); }
+}
+
+void ui_set_iss(double lat, double lon, float altKm, float velKmh, bool sunlit, bool darkAtHome) {
+    s_issHave = true; s_issLat = lat; s_issLon = lon; s_issAlt = altKm; s_issVel = velKmh;
+    s_issSunlit = sunlit; s_issDark = darkAtHome;
+    iss_find_now();
+    if (ui_iss_view_active()) { iss_text(); if (s_issLayer) lv_obj_invalidate(s_issLayer); }
+}
+
+void ui_set_iss_track(const float *lat, const float *lon, int n) {
+    // The points are minutes apart (thousands of km): fill in 12 steps along the great circle
+    // between neighbours so the line curves like the real ground track does.
+    s_issTrack.clear();
+    const int SUB = 12;
+    for (int i = 0; i < n; ++i) {
+        if (i == 0) { s_issTrack.push_back({ lat[0], lon[0] }); continue; }
+        const double r = M_PI / 180.0;
+        const double la1 = lat[i - 1] * r, lo1 = lon[i - 1] * r, la2 = lat[i] * r, lo2 = lon[i] * r;
+        const double x1 = cos(la1) * cos(lo1), y1 = cos(la1) * sin(lo1), z1 = sin(la1);
+        const double x2 = cos(la2) * cos(lo2), y2 = cos(la2) * sin(lo2), z2 = sin(la2);
+        for (int s = 1; s <= SUB; ++s) {
+            const double f = (double)s / SUB;
+            const double x = x1 + (x2 - x1) * f, y = y1 + (y2 - y1) * f, z = z1 + (z2 - z1) * f;
+            s_issTrack.push_back({ (float)(atan2(z, sqrt(x * x + y * y)) / r), (float)(atan2(y, x) / r) });
+        }
+    }
+    iss_find_now();
+    if (ui_iss_view_active() && s_issLayer) lv_obj_invalidate(s_issLayer);
+}
+
+static void build_iss(void) {
+    lv_obj_clear_flag(s_tileIss, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *p = make_round_panel(s_tileIss);
+    lv_obj_set_style_bg_color(p, lv_color_black(), 0);
+    s_issLayer = lv_obj_create(p);
+    lv_obj_remove_style_all(s_issLayer);
+    lv_obj_set_size(s_issLayer, SCREEN_W, SCREEN_H);
+    lv_obj_center(s_issLayer);
+    lv_obj_clear_flag(s_issLayer, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_issLayer, iss_draw_cb, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_t *t = make_tile_title(p, "ISS");
+    lv_obj_set_style_bg_color(t, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(t, 170, 0);
+    lv_obj_set_style_pad_hor(t, 8, 0);
+    lv_obj_set_style_radius(t, 8, 0);
+    s_issStatus = lv_label_create(p);
+    lv_obj_set_width(s_issStatus, s_bigText ? 380 : 330);
+    lv_obj_set_style_text_font(s_issStatus, F14(), 0);
+    lv_obj_set_style_text_align(s_issStatus, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(s_issStatus, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_issStatus, 170, 0);
+    lv_obj_align(s_issStatus, LV_ALIGN_BOTTOM_MID, 0, s_bigText ? -96 : -80);
+    s_issInfo = lv_label_create(p);
+    lv_obj_set_width(s_issInfo, 300);
+    lv_obj_set_style_text_font(s_issInfo, F14(), 0);
+    lv_obj_set_style_text_color(s_issInfo, UI_INK, 0);
+    lv_obj_set_style_text_align(s_issInfo, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(s_issInfo, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_issInfo, 170, 0);
+    lv_obj_align(s_issInfo, LV_ALIGN_BOTTOM_MID, 0, s_bigText ? -46 : -38);
+    s_issScale = lv_label_create(p);
+    lv_obj_set_style_text_font(s_issScale, &lv_font_montserrat_12, 0);   // small: the rim is narrow here
+    lv_obj_set_style_text_color(s_issScale, UI_DIM, 0);
+    lv_obj_align(s_issScale, LV_ALIGN_BOTTOM_MID, 0, s_bigText ? -24 : -18);
+    // a tap anywhere switches 3.000 <-> 9.000 km
+    lv_obj_add_flag(p, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(p, [](lv_event_t *) {
+        s_issRangeIdx ^= 1;
+        iss_project_coast();
+        iss_text();
+        if (s_issLayer) lv_obj_invalidate(s_issLayer);
+    }, LV_EVENT_CLICKED, NULL);
+    iss_text();
+}
+
 // ------------------------------------------------------------------- message
 // Spruch des Tages: a round card over everything, until OK is tapped. Built on demand and
 // deleted on OK (a handful of objects, ~1-2 KB of LVGL heap while it shows).
@@ -1709,7 +1983,8 @@ static void build_photo(void) {
 // View index (0 radar, 1 list, 2 stats, 3 weather, 4 settings, 5 photo) -> tile column.
 // Photo | Settings | Radar | List | Stats | Weather: views 0..3 are columns 2..5.
 void ui_show_view(int idx) {
-    if (!s_tv || idx < 0 || idx > 5) return;
+    if (!s_tv || idx < 0 || idx > 6) return;
+    if (idx == 6) { lv_obj_set_tile_id(s_tv, 6, 0, LV_ANIM_OFF); iss_open(); return; }
     if (idx == 4) settings_open();
     const uint32_t col = idx == 5 ? 0 : (idx == 4 ? 1 : (uint32_t)(idx + 2));
     lv_obj_set_tile_id(s_tv, col, 0, LV_ANIM_OFF);
@@ -1798,7 +2073,8 @@ void ui_create(void) {
     s_tileRadar = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);
     s_tileList  = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);
     s_tileStats = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);
-    s_tileWeather = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);
+    s_tileWeather = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_HOR);
+    s_tileIss     = lv_tileview_add_tile(s_tv, 6, 0, LV_DIR_LEFT);   // ISS, after the weather
     // Rebuild the list/stats with the latest data the moment they slide into view
     // (between polls they'd otherwise show whatever was there when last visible).
     // Settings content lives only while its tile is (partly) on screen: build it as soon as a
@@ -1809,6 +2085,7 @@ void ui_create(void) {
     }, LV_EVENT_SCROLL, nullptr);
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) {
         if (lv_tileview_get_tile_act(s_tv) != s_tileSettings) settings_close();
+        if (lv_tileview_get_tile_act(s_tv) != s_tileIss) iss_close();   // frees its coastline
         refresh_active_tile();
         if (s_viewChangedCb) s_viewChangedCb(active_view_index());   // let main remember the last view
     }, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -2248,6 +2525,7 @@ void ui_create(void) {
     build_settings();
 
     build_photo();
+    build_iss();
     lv_obj_set_tile_id(s_tv, 2, 0, LV_ANIM_OFF);   // start on the radar (column 2)
 
     ui_splash_show();   // branded boot splash on top (auto-fades)

@@ -294,6 +294,24 @@ int main(int argc, char **argv) {
     if (!getenv("NOMAP")) { mock_init(); sim_map_refresh(); }   // NOMAP=1: the plain scope
     sim_make_photo();
     ui_set_user_photo(s_simPhoto);
+    {   // mock ISS: a simple circular orbit (51.6 deg) passing north-west of home
+        const double inc = 51.6 * M_PI / 180.0, per = 92.7 * 60.0, rot = 2 * M_PI / 86164.0;
+        const double u0 = 2.0, lon0 = -40.0 * M_PI / 180.0;
+        auto at = [&](double ts, float *la, float *lo) {
+            const double u = u0 + 2 * M_PI * ts / per;
+            *la = (float)(asin(sin(inc) * sin(u)) * 180.0 / M_PI);
+            double l = lon0 + atan2(cos(inc) * sin(u), cos(u)) - rot * ts;
+            l = fmod(l + 3 * M_PI, 2 * M_PI) - M_PI;
+            *lo = (float)(l * 180.0 / M_PI);
+        };
+        float la[ISS_TRACK_POINTS], lo[ISS_TRACK_POINTS];
+        for (int i = 0; i < ISS_TRACK_POINTS; ++i) at(i * ISS_TRACK_STEP_S - ISS_TRACK_PAST_S, &la[i], &lo[i]);
+        float cl, co;
+        at(getenv("ISST") ? atof(getenv("ISST")) : -900.0, &cl, &co);
+        ui_set_iss_home(HOME_LAT_DEFAULT, HOME_LON_DEFAULT);
+        ui_set_iss(cl, co, 418.0f, 27580.0f, true, !getenv("ISSDAY"));
+        ui_set_iss_track(la, lo, ISS_TRACK_POINTS);
+    }
     mock_init();
     radar::update(g_mockAcs, g_set);
     ui_on_data_updated();
@@ -448,7 +466,7 @@ int main(int argc, char **argv) {
             int ow, oh;
             SDL_GetRendererOutputSize(s_ren, &ow, &oh);
             struct Shot { const char *name; int view; int theme; bool forecast; int units; };
-            const Shot shots[11] = {
+            const Shot shots[12] = {
                 { "radar",  0, THEME_PHOSPHOR, false, 0 },
                 { "orb", 0, THEME_ORB, false, 0 },
                 { "amber",  0, THEME_AMBER, false, 0 },
@@ -460,8 +478,9 @@ int main(int argc, char **argv) {
                 { "forecast",3, THEME_PHOSPHOR, true, 0 },
                 { "settings",4, THEME_PHOSPHOR, false, 0 },
                 { "photo",  5, THEME_PHOSPHOR, false, 0 },
+                { "iss",    6, THEME_PHOSPHOR, false, 0 },
             };
-            for (int v = 0; v < 11; ++v) {
+            for (int v = 0; v < 12; ++v) {
                 ui_set_units(shots[v].units);
                 ui_set_range_km(g_set.rangeKm);   // like handleUnits() on the device: zoom label,
                 ui_on_data_updated();             // then the card/list in the new units

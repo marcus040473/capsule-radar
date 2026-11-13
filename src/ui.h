@@ -66,6 +66,11 @@ bool ui_message_up(void);
 // ms von selbst. hex != "": ein Tipp darauf zeigt dieses Flugzeug auf dem Radar.
 void ui_show_toast(const char *title, const char *text, uint32_t ms, const char *hex);
 // Tagesrekorde für die Statistik-Seite (Tipp auf die Seite: Jetzt <-> Heute).
+// ISS-Seite (ganz rechts, nach dem Wetter): stark herausgezoomtes Radar mit der ISS.
+void ui_set_iss_home(double lat, double lon);                       // Mittelpunkt (eigener Standort)
+void ui_set_iss(double lat, double lon, float altKm, float velKmh, bool sunlit, bool darkAtHome);
+void ui_set_iss_track(const float *lat, const float *lon, int n);  // Bahn (Vergangenheit -> Zukunft)
+bool ui_iss_view_active(void);                                      // die Seite ist gerade zu sehen
 void ui_set_day_stats(int count, float maxAltFt, const char *altCall, float maxGsKt, const char *gsCall,
                       float minDistKm, const char *distCall);
 // Flugzeug verfolgen: das Auge auf der Detailkarte ruft cb(hex) (Start) bzw. cb("") (Ende).
