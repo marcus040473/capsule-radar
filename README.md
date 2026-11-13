@@ -36,6 +36,10 @@
 > besondere Grüße. Abschaltbar in den Einstellungen. Name/Adresse: `lisasradar.local`,
 > Einrichtungs-WLAN `LisasRadar-Setup` (`DEVICE_HOSTNAME`, `SETUP_AP_NAME` in `config.h`).
 >
+> **Handy-App:** im Ordner `android/` liegt die App „Lisas Radar“ (`LisasRadar.apk` im Release).
+> Sie findet das Radar im WLAN, zeigt seine Einstellungsseite und schickt mit einem Knopf den
+> Standort des Handys als neuen Mittelpunkt (`POST /loc`, ab Firmware 1.8.0-de13).
+>
 > **ISS-Seite:** vom Wetter aus noch einmal nach links wischen. Ein stark herausgezoomtes
 > Radar (3.000 km, Tippen: 9.000 km) mit dem eigenen Standort in der Mitte, Küstenlinien,
 > der Bahn der ISS (20 min zurück, 25 min voraus), dem Sichtkreis (dort steht sie mehr als

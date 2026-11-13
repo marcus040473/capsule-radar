@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'de.lisasradar.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'de.lisasradar.app'
+        minSdk 26          // Android 8.0 und neuer
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Fester Schlüssel im Repo, damit sich jede neue Version als Update über die alte
+    // installieren lässt (ein privates Geschenk, nicht im Play Store -- daher kein Geheimnis).
+    signingConfigs {
+        release {
+            storeFile file('lisasradar.jks')
+            storePassword 'lisasradar'
+            keyAlias 'lisasradar'
+            keyPassword 'lisasradar'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    lint {
+        checkReleaseBuilds false   // no Play Store: don't let lint warnings stop the CI build
+        abortOnError false
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+// Keine Bibliotheken: nur das Android-Framework (WebView, NsdManager, LocationManager).

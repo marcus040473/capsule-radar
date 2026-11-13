@@ -1522,6 +1522,45 @@ static void handleGps() {   // auto-set the centre point from the LC76G GPS (-G 
     g_web.send(200, "text/plain", "ok");
 }
 
+// ---- Handy-App ("Lisas Radar" für Android, Ordner android/) ----
+// GET /api/info: woran die App das Radar im WLAN erkennt (Name, Version, Standort). Nur lesen;
+// ohne CORS-Header kann eine fremde Webseite die Antwort nicht auswerten.
+static void handleApiInfo() {
+    char b[256];
+    snprintf(b, sizeof(b),
+             "{\"app\":\"capsuleradar\",\"name\":\"%s\",\"version\":\"%s\",\"lat\":%.6f,\"lon\":%.6f,\"gps\":%s}",
+             UI_APP_NAME, FW_VERSION, g_settings.homeLat, g_settings.homeLon, g_useGps ? "true" : "false");
+    g_web.send(200, "application/json", b);
+}
+
+// POST /loc (lat, lon): der Standort des Handys wird der neue Mittelpunkt -- sofort, ohne
+// Neustart, und dauerhaft gespeichert. Wie die Live-Einstellungen nur mit X-Radar-Header.
+// War "GPS für den Standort verwenden" an, wird es ausgeschaltet, sonst würde das GPS den
+// eben gesendeten Standort gleich wieder überschreiben.
+static void handleLoc() {
+    if (refuseUnlessPageFetch()) return;
+    double lat = 0, lon = 0;
+    if (!parseDoubleStrict(g_web.arg("lat").c_str(), &lat) || lat < -90.0 || lat > 90.0 ||
+        !parseDoubleStrict(g_web.arg("lon").c_str(), &lon) || lon < -180.0 || lon > 180.0) {
+        g_web.send(400, "application/json", "{\"ok\":false,\"error\":\"Breiten-/Längengrad ungültig\"}");
+        return;
+    }
+    const bool gpsWasOn = g_useGps;
+    Preferences p;
+    p.begin("capsuleradar", false);
+    p.putDouble("homeLat", lat);
+    p.putDouble("homeLon", lon);
+    if (gpsWasOn) p.putBool("usegps", false);
+    p.end();
+    g_useGps = false;
+    g_settings.homeLat = lat; g_settings.homeLon = lon;   // radar, coastline, map, ISS follow
+    g_requeryKm = queryRadiusKm();                        // as in the GPS re-centre path
+    setQueryCenter();
+    g_requery = true;                                     // adsb_task re-queries the new area
+    Serial.printf("[app] new home %.5f, %.5f\n", lat, lon);
+    g_web.send(200, "application/json", gpsWasOn ? "{\"ok\":true,\"gpsOff\":true}" : "{\"ok\":true,\"gpsOff\":false}");
+}
+
 // ---- Gespeicherte WLANs ----
 // Der WLAN-Treiber merkt sich nur EIN Netz. Damit man am Gerät zwischen mehreren wählen kann
 // (Zuhause, Büro, Handy-Hotspot), stehen bis zu WIFI_NETS_MAX Netze mit Passwort zusätzlich
@@ -2026,6 +2065,8 @@ void setup() {
 #endif
     });
     g_web.on("/gps", handleGps);
+    g_web.on("/api/info", HTTP_GET, handleApiInfo);
+    g_web.on("/loc", HTTP_POST, handleLoc);
     g_web.on("/units", handleUnits);
     g_web.on("/tempu", handleTempUnit);
     g_web.on("/photo.jpg", HTTP_GET, []() {

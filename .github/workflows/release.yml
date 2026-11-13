@@ -24,7 +24,32 @@ permissions:
   contents: write
 
 jobs:
+  # Android-App "Lisas Radar" (Ordner android/): wird mitgebaut und hängt als LisasRadar.apk
+  # am selben Release wie die Firmware.
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: APK bauen
+        run: |
+          set -euo pipefail
+          gradle -p android --no-daemon assembleRelease
+          cp android/app/build/outputs/apk/release/app-release.apk LisasRadar.apk
+          ls -la LisasRadar.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: LisasRadar.apk
+
   release:
+    needs: apk
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +123,10 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -110,11 +139,14 @@ jobs:
             CapsuleRadar-ota-amoled143.bin
             CapsuleRadar-esp32s3-lcd21.bin
             CapsuleRadar-ota-lcd21.bin
+            LisasRadar.apk
           name: Capsule Radar ${{ inputs.tag || github.ref_name }} (Deutsch)
           generate_release_notes: false
           body: |
             **Capsule Radar – deutsche Version.** Display, Konfigurationsseite und WLAN-Einrichtung auf Deutsch (mit Umlauten).
             **Am Gerät:** auf dem Radar nach rechts wischen = Einstellungen (Ton, Design, Bild drehen, WLAN an/aus, WLAN wählen/hinzufügen, QR-Code zur Webseite, Ausschalten …). **Karte unter dem Radar** (Einstellungen → Karte: Aus / Dunkel / Hell). Noch einmal wischen = Foto-Seite – das Foto auf der Webseite `lisasradar.local` hochladen. Ganz rechts, hinter dem Wetter: die **ISS-Seite** (wo die Raumstation gerade ist, mit Bahn und Sichtkreis).
+
+            **Handy-App (Android):** `LisasRadar.apk` aufs Handy laden und öffnen (einmal „Apps aus unbekannten Quellen“ erlauben). Die App findet das Radar im WLAN, zeigt die Einstellungen und schickt mit einem Knopf den Standort des Handys ans Radar.
 
             Es werden drei Boards unterstützt. Die Datei muss zu Ihrem Board passen:
 

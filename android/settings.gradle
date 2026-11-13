@@ -1,0 +1,17 @@
+// Lisas Radar -- kleine Android-App zum Flug- & Wetterradar (siehe README.md hier im Ordner).
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "LisasRadar"
+include ':app'
